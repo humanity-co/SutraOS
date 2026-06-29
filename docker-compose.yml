@@ -1,0 +1,56 @@
+version: '3.8'
+
+services:
+  # HAProxy / Nginx Load Balancer to distribute traffic
+  lb:
+    image: nginx:latest
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+      - frontend
+
+  # Scalable Backend API cluster
+  api:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile
+    deploy:
+      replicas: 4 # Scales to 4 instances for Result Day traffic
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 4G
+    environment:
+      - DATABASE_URL=postgresql://sutra:secret@db/sutraos
+      - WORKERS_PER_CORE=2
+    depends_on:
+      - db
+      - redis
+
+  # Stateful Database Cluster (Read-Replicas ready)
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_USER=sutra
+      - POSTGRES_PASSWORD=secret
+      - POSTGRES_DB=sutraos
+    volumes:
+      - sutraos_pgdata:/var/lib/postgresql/data
+
+  # Redis for Stateless JWT Token Caching and Rate Limiting
+  redis:
+    image: redis:alpine
+    ports:
+      - "6379:6379"
+
+  # Scalable Frontend Nginx Servers
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    deploy:
+      replicas: 2
+
+volumes:
+  sutraos_pgdata:

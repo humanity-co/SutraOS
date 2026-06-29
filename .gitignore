@@ -1,0 +1,29 @@
+# Dependencies
+node_modules/
+dist/
+build/
+
+# Python Virtual Environments
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# Local Database files
+*.db
+
+# OS Files
+.DS_Store
+
+# Demo Media & Screenshot Captures (User requested not to add demo videos/large files)
+*.mov
+*.mp4
+*.webm
+*.webp
+*.png
+*.jpg
+*.jpeg
+frames/
+frames_student/
+scratch_scraper/
+docs/
