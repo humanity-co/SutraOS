@@ -3,7 +3,7 @@ import bcrypt
 import random
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from models import Base, User, Department, StudentProfile, FacultyProfile, Course, ExamRecord, ScholarshipLedger, PlacementDrive, FeeInvoice, LeaveRequest, Classroom, CourseOffering, TimetableSlot
+from models import Base, User, Department, StudentProfile, FacultyProfile, Course, ExamRecord, ScholarshipLedger, PlacementDrive, FeeInvoice, LeaveRequest, Classroom, CourseOffering, TimetableSlot, LibraryBook, LibraryCheckout, BusRoute, TransportReservation, HostelAdmission
 from passlib.context import CryptContext
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -285,7 +285,30 @@ async def seed_data():
             TimetableSlot(offering_id=co2.id, classroom_id=c2.id, day_of_week="Thursday", start_time="11:00 AM", end_time="12:00 PM")
         ]
         session.add_all(timetable)
-        
+        await session.commit()
+
+        # Seed Library Books
+        books = [
+            LibraryBook(title="Clean Code", author="Robert C. Martin", isbn="9780132350884", total_copies=5, available_copies=5),
+            LibraryBook(title="Introduction to Algorithms", author="Thomas H. Cormen", isbn="9780262033848", total_copies=3, available_copies=3),
+            LibraryBook(title="Computer Networks", author="Andrew S. Tanenbaum", isbn="9780132126953", total_copies=4, available_copies=4)
+        ]
+        session.add_all(books)
+
+        # Seed Bus Routes
+        routes = [
+            BusRoute(route_name="Aurangabad City Route 1", bus_number="MH-20-EF-1234", driver_name="Satish Singh", capacity=3, reserved_seats=0),
+            BusRoute(route_name="Chhatrapati Sambhajinagar Route 2", bus_number="MH-20-GH-5678", driver_name="Ramesh Patil", capacity=25, reserved_seats=0)
+        ]
+        session.add_all(routes)
+
+        # Seed Hostel Admissions
+        hostel_admissions = [
+            HostelAdmission(student_id=student_users[0].id, room_number="101-A", block_name="Aryabhata Hostel Block", parent_consent_approved=True),
+            HostelAdmission(student_id=student_users[1].id, room_number="102-B", block_name="Aryabhata Hostel Block", parent_consent_approved=False)
+        ]
+        session.add_all(hostel_admissions)
+
         await session.commit()
         print("Database seeding completed successfully!")
 

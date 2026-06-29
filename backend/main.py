@@ -663,12 +663,24 @@ async def create_drive(drive: schemas.PlacementDriveCreate, current_user: models
 
 
 @app.post("/campus/gatepass", response_model=schemas.GatepassRequestOut)
-async def request_gatepass(gp: schemas.GatepassRequestCreate, current_user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def request_gatepass(gp: schemas.GatepassRequestCreate, current_user: models.User = Depends(require_role(["STUDENT"])), db: AsyncSession = Depends(get_db)):
+    # Check if student is admitted to hostel
+    res_adm = await db.execute(select(models.HostelAdmission).where(models.HostelAdmission.student_id == current_user.id))
+    adm = res_adm.scalars().first()
+    
+    # If they reside in a hostel, verify parental consent
+    if adm and not adm.parent_consent_approved:
+        raise HTTPException(
+            status_code=400,
+            detail="Approval Blocked: Parental consent has been denied for this outing."
+        )
+
     db_gp = models.GatepassRequest(
         student_id=current_user.id,
         reason=gp.reason,
         out_date=gp.out_date,
-        in_date=gp.in_date
+        in_date=gp.in_date,
+        status="PENDING"
     )
     db.add(db_gp)
     await db.commit()
@@ -1041,6 +1053,176 @@ async def apply_drive(drive_id: str, db: AsyncSession = Depends(get_db), current
 async def get_drives(db: AsyncSession = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     res = await db.execute(select(models.PlacementDrive).order_by(models.PlacementDrive.drive_date.asc()))
     return res.scalars().all()
+
+
+# --- LIBRARY ROUTING ---
+@app.post("/library/books", response_model=schemas.LibraryBookOut)
+async def create_library_book(book: schemas.LibraryBookCreate, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "LIBRARIAN"])), db: AsyncSession = Depends(get_db)):
+    db_book = models.LibraryBook(**book.dict())
+    db.add(db_book)
+    await db.commit()
+    await db.refresh(db_book)
+    return db_book
+
+@app.get("/library/books", response_model=list[schemas.LibraryBookOut])
+async def list_library_books(current_user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(models.LibraryBook))
+    return res.scalars().all()
+
+@app.post("/library/checkout", response_model=schemas.LibraryCheckoutOut)
+async def checkout_book(checkout: schemas.LibraryCheckoutCreate, current_user: models.User = Depends(require_role(["STUDENT"])), db: AsyncSession = Depends(get_db)):
+    res_overdue = await db.execute(
+        select(models.LibraryCheckout).where(
+            models.LibraryCheckout.student_id == current_user.id,
+            models.LibraryCheckout.status == "OVERDUE"
+        )
+    )
+    overdue = res_overdue.scalars().all()
+    if overdue:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Library Block: Cannot check out new books. You have {len(overdue)} overdue books outstanding."
+        )
+
+    res_book = await db.execute(select(models.LibraryBook).where(models.LibraryBook.id == checkout.book_id))
+    book = res_book.scalars().first()
+    if not book:
+        raise HTTPException(status_code=404, detail="Book not found")
+        
+    if book.available_copies <= 0:
+        raise HTTPException(status_code=400, detail="No copies available for checkout")
+
+    checkout_date = datetime.utcnow().isoformat() + "Z"
+    due_date = (datetime.utcnow() + timedelta(days=14)).isoformat() + "Z"
+    
+    db_checkout = models.LibraryCheckout(
+        student_id=current_user.id,
+        book_id=checkout.book_id,
+        checkout_date=checkout_date,
+        due_date=due_date,
+        status="ISSUED"
+    )
+    
+    book.available_copies -= 1
+    
+    db.add(db_checkout)
+    await db.commit()
+    await db.refresh(db_checkout)
+    
+    res = await db.execute(
+        select(models.LibraryCheckout)
+        .where(models.LibraryCheckout.id == db_checkout.id)
+        .options(selectinload(models.LibraryCheckout.book))
+    )
+    return res.scalars().first()
+
+@app.post("/library/checkout/{id}/return", response_model=schemas.LibraryCheckoutOut)
+async def return_book(id: str, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "LIBRARIAN"])), db: AsyncSession = Depends(get_db)):
+    res_checkout = await db.execute(
+        select(models.LibraryCheckout)
+        .where(models.LibraryCheckout.id == id)
+        .options(selectinload(models.LibraryCheckout.book))
+    )
+    checkout = res_checkout.scalars().first()
+    if not checkout:
+        raise HTTPException(status_code=404, detail="Checkout record not found")
+        
+    if checkout.status == "RETURNED":
+        raise HTTPException(status_code=400, detail="Book is already returned")
+
+    checkout.status = "RETURNED"
+    checkout.returned_at = datetime.utcnow().isoformat() + "Z"
+    
+    if checkout.book:
+        checkout.book.available_copies += 1
+        
+    await db.commit()
+    await db.refresh(checkout)
+    return checkout
+
+@app.get("/library/checkouts/me", response_model=list[schemas.LibraryCheckoutOut])
+async def list_my_checkouts(current_user: models.User = Depends(require_role(["STUDENT"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(models.LibraryCheckout)
+        .where(models.LibraryCheckout.student_id == current_user.id)
+        .options(selectinload(models.LibraryCheckout.book))
+    )
+    return res.scalars().all()
+
+
+# --- TRANSPORT ROUTING ---
+@app.post("/transport/routes", response_model=schemas.BusRouteOut)
+async def create_bus_route(route: schemas.BusRouteCreate, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "TRANSPORT_OFFICER"])), db: AsyncSession = Depends(get_db)):
+    db_route = models.BusRoute(**route.dict())
+    db.add(db_route)
+    await db.commit()
+    await db.refresh(db_route)
+    return db_route
+
+@app.get("/transport/routes", response_model=list[schemas.BusRouteOut])
+async def list_bus_routes(current_user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(models.BusRoute))
+    return res.scalars().all()
+
+@app.post("/transport/reserve", response_model=schemas.TransportReservationOut)
+async def reserve_seat(reserve: schemas.TransportReservationCreate, current_user: models.User = Depends(require_role(["STUDENT"])), db: AsyncSession = Depends(get_db)):
+    res_route = await db.execute(select(models.BusRoute).where(models.BusRoute.id == reserve.route_id))
+    route = res_route.scalars().first()
+    if not route:
+        raise HTTPException(status_code=404, detail="Bus route not found")
+        
+    if route.reserved_seats >= route.capacity:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Transport Block: Route [{route.route_name}] has reached its maximum passenger capacity ({route.capacity})."
+        )
+        
+    route.reserved_seats += 1
+    
+    db_reserve = models.TransportReservation(
+        student_id=current_user.id,
+        route_id=reserve.route_id,
+        seat_number=route.reserved_seats,
+        reserved_at=datetime.utcnow().isoformat() + "Z"
+    )
+    
+    db.add(db_reserve)
+    await db.commit()
+    await db.refresh(db_reserve)
+    
+    res = await db.execute(
+        select(models.TransportReservation)
+        .where(models.TransportReservation.id == db_reserve.id)
+        .options(selectinload(models.TransportReservation.route))
+    )
+    return res.scalars().first()
+
+@app.get("/transport/reservations/me", response_model=list[schemas.TransportReservationOut])
+async def list_my_reservations(current_user: models.User = Depends(require_role(["STUDENT"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(models.TransportReservation)
+        .where(models.TransportReservation.student_id == current_user.id)
+        .options(selectinload(models.TransportReservation.route))
+    )
+    return res.scalars().all()
+
+
+# --- HOSTEL ROUTING ---
+@app.post("/hostel/admissions", response_model=schemas.HostelAdmissionOut)
+async def create_hostel_admission(adm: schemas.HostelAdmissionCreate, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "HOSTEL_WARDEN"])), db: AsyncSession = Depends(get_db)):
+    db_adm = models.HostelAdmission(**adm.dict())
+    db.add(db_adm)
+    await db.commit()
+    await db.refresh(db_adm)
+    return db_adm
+
+@app.get("/hostel/admissions/me", response_model=schemas.HostelAdmissionOut)
+async def get_my_hostel_admission(current_user: models.User = Depends(require_role(["STUDENT"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(models.HostelAdmission).where(models.HostelAdmission.student_id == current_user.id))
+    adm = res.scalars().first()
+    if not adm:
+        raise HTTPException(status_code=404, detail="Hostel admission not found for this student")
+    return adm
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

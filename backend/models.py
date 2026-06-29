@@ -267,3 +267,61 @@ class PlacementApplication(Base):
     current_round = Column(Integer, default=1) # 1: Aptitude, 2: Technical, 3: HR, 4: Offered
     status = Column(String, default="IN_PROGRESS") # IN_PROGRESS, REJECTED, OFFERED
 
+
+# --- LIBRARY MODULE ---
+class LibraryBook(Base):
+    __tablename__ = "library_books"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    title = Column(String, nullable=False)
+    author = Column(String, nullable=False)
+    isbn = Column(String, unique=True, index=True, nullable=True)
+    total_copies = Column(Integer, default=5)
+    available_copies = Column(Integer, default=5)
+
+class LibraryCheckout(Base):
+    __tablename__ = "library_checkouts"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    student_id = Column(String, ForeignKey("users.id"), nullable=False)
+    book_id = Column(String, ForeignKey("library_books.id"), nullable=False)
+    checkout_date = Column(String, nullable=False) # ISO date string
+    due_date = Column(String, nullable=False)
+    returned_at = Column(String, nullable=True)
+    status = Column(String, default="ISSUED") # ISSUED, RETURNED, OVERDUE
+    
+    student = relationship("User", foreign_keys=[student_id])
+    book = relationship("LibraryBook")
+
+
+# --- TRANSPORT MODULE ---
+class BusRoute(Base):
+    __tablename__ = "bus_routes"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    route_name = Column(String, unique=True, index=True, nullable=False)
+    bus_number = Column(String, nullable=False)
+    driver_name = Column(String, nullable=False)
+    capacity = Column(Integer, default=30)
+    reserved_seats = Column(Integer, default=0)
+
+class TransportReservation(Base):
+    __tablename__ = "transport_reservations"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    student_id = Column(String, ForeignKey("users.id"), nullable=False)
+    route_id = Column(String, ForeignKey("bus_routes.id"), nullable=False)
+    seat_number = Column(Integer, nullable=False)
+    reserved_at = Column(String, nullable=False)
+    
+    student = relationship("User", foreign_keys=[student_id])
+    route = relationship("BusRoute")
+
+
+# --- HOSTEL MODULE ---
+class HostelAdmission(Base):
+    __tablename__ = "hostel_admissions"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    student_id = Column(String, ForeignKey("users.id"), unique=True, nullable=False)
+    room_number = Column(String, nullable=False)
+    block_name = Column(String, nullable=False)
+    parent_consent_approved = Column(Boolean, default=True)
+    
+    student = relationship("User", foreign_keys=[student_id])
+

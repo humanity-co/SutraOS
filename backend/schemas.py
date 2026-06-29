@@ -292,3 +292,89 @@ class ScholarshipCreate(BaseModel):
     student_id: str
     scholarship_name: str
     amount: float
+
+
+# --- LIBRARY SCHEMAS ---
+class LibraryBookCreate(BaseModel):
+    title: str
+    author: str
+    isbn: Optional[str] = None
+    total_copies: Optional[int] = 5
+
+class LibraryBookOut(BaseModel):
+    id: str
+    title: str
+    author: str
+    isbn: Optional[str] = None
+    total_copies: int
+    available_copies: int
+    
+    class Config:
+        from_attributes = True
+
+class LibraryCheckoutCreate(BaseModel):
+    book_id: str
+
+class LibraryCheckoutOut(BaseModel):
+    id: str
+    student_id: str
+    book_id: str
+    checkout_date: str
+    due_date: str
+    returned_at: Optional[str] = None
+    status: str
+    book: Optional[LibraryBookOut] = None
+    
+    class Config:
+        from_attributes = True
+
+
+# --- TRANSPORT SCHEMAS ---
+class BusRouteCreate(BaseModel):
+    route_name: str
+    bus_number: str
+    driver_name: str
+    capacity: Optional[int] = 30
+
+class BusRouteOut(BaseModel):
+    id: str
+    route_name: str
+    bus_number: str
+    driver_name: str
+    capacity: int
+    reserved_seats: int
+    
+    class Config:
+        from_attributes = True
+
+class TransportReservationCreate(BaseModel):
+    route_id: str
+
+class TransportReservationOut(BaseModel):
+    id: str
+    student_id: str
+    route_id: str
+    seat_number: int
+    reserved_at: str
+    route: Optional[BusRouteOut] = None
+    
+    class Config:
+        from_attributes = True
+
+
+# --- HOSTEL SCHEMAS ---
+class HostelAdmissionCreate(BaseModel):
+    student_id: str
+    room_number: str
+    block_name: str
+    parent_consent_approved: Optional[bool] = True
+
+class HostelAdmissionOut(BaseModel):
+    id: str
+    student_id: str
+    room_number: str
+    block_name: str
+    parent_consent_approved: bool
+    
+    class Config:
+        from_attributes = True
