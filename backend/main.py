@@ -23,6 +23,19 @@ async def lifespan(app: FastAPI):
     # Shutdown
     pass
 
+ROLE_MAP = {
+    "SUPER_ADMIN": "System Administrator",
+    "INSTITUTION_ADMIN": "Institution Admin",
+    "PRINCIPAL": "Principal",
+    "REGISTRAR": "Registrar",
+    "EXAM_CONTROLLER": "Controller of Examinations",
+    "ACCOUNTS": "Accounts Head",
+    "PLACEMENT_OFFICER": "Training & Placement Officer",
+    "HOD": "Head of Department",
+    "FACULTY": "Faculty Member",
+    "STUDENT": "Student"
+}
+
 app = FastAPI(title="SutraOS API", lifespan=lifespan)
 
 # Allow React frontend
@@ -35,7 +48,7 @@ app.add_middleware(
 )
 
 import os
-UPLOAD_DIR = "/Users/devsmac/Desktop/SutraOS/backend/uploads"
+UPLOAD_DIR = os.environ.get("UPLOAD_DIR", os.path.join(os.path.dirname(__file__), "uploads"))
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=UPLOAD_DIR), name="uploads")
 
@@ -50,17 +63,22 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
 
 # --- AUTH ENDPOINTS ---
 
+from datetime import timedelta
+
 @app.post("/token", response_model=schemas.Token)
 async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(models.User).where(func.lower(models.User.username) == func.lower(form_data.username.strip())))
     user = result.scalars().first()
-    if not user:
+    if not user or not auth.verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    access_token = auth.create_access_token(data={"sub": user.username})
+    access_token = auth.create_access_token(
+        data={"sub": user.username},
+        expires_delta=timedelta(minutes=auth.ACCESS_TOKEN_EXPIRE_MINUTES)
+    )
     return {"access_token": access_token, "token_type": "bearer"}
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)):
@@ -83,10 +101,23 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession
         raise credentials_exception
     return user
 
+def require_role(allowed_roles: list[str]):
+    async def dependency(current_user: models.User = Depends(get_current_user)):
+        if current_user.system_role not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to perform this action"
+            )
+        return current_user
+    return dependency
+
 # --- USERS ENDPOINTS ---
 
 @app.post("/users", response_model=schemas.UserOut)
-async def create_user(user: schemas.UserCreate, db: AsyncSession = Depends(get_db)):
+async def create_user(user: schemas.UserCreate, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN"])), db: AsyncSession = Depends(get_db)):
+    if len(user.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters long")
+        
     result = await db.execute(select(models.User).where(models.User.username == user.username))
     if result.scalars().first():
         raise HTTPException(status_code=400, detail="Username already registered")
@@ -118,7 +149,7 @@ async def list_users(db: AsyncSession = Depends(get_db), current_user: models.Us
 # --- DEPARTMENTS ENDPOINTS ---
 
 @app.post("/departments", response_model=schemas.DepartmentOut)
-async def create_department(dept: schemas.DepartmentCreate, db: AsyncSession = Depends(get_db)):
+async def create_department(dept: schemas.DepartmentCreate, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN"])), db: AsyncSession = Depends(get_db)):
     db_dept = models.Department(name=dept.name, code=dept.code)
     db.add(db_dept)
     await db.commit()
@@ -126,14 +157,14 @@ async def create_department(dept: schemas.DepartmentCreate, db: AsyncSession = D
     return db_dept
 
 @app.get("/departments", response_model=list[schemas.DepartmentOut])
-async def read_departments(skip: int = 0, limit: int = 100, db: AsyncSession = Depends(get_db)):
+async def read_departments(skip: int = 0, limit: int = 100, current_user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(models.Department).offset(skip).limit(limit))
     return result.scalars().all()
 
 # --- DESIGNATIONS ENDPOINTS ---
 
 @app.post("/designations", response_model=schemas.DesignationOut)
-async def create_designation(designation: schemas.DesignationCreate, db: AsyncSession = Depends(get_db)):
+async def create_designation(designation: schemas.DesignationCreate, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN"])), db: AsyncSession = Depends(get_db)):
     db_desig = models.Designation(title=designation.title)
     db.add(db_desig)
     await db.commit()
@@ -265,7 +296,7 @@ async def read_faculty(db: AsyncSession = Depends(get_db)):
 # --- FINANCE ENDPOINTS ---
 
 @app.post("/finance/invoices", response_model=schemas.FeeInvoiceOut)
-async def generate_invoice(invoice: schemas.FeeInvoiceCreate, db: AsyncSession = Depends(get_db)):
+async def generate_invoice(invoice: schemas.FeeInvoiceCreate, current_user: models.User = Depends(require_role(["ACCOUNTS", "SUPER_ADMIN"])), db: AsyncSession = Depends(get_db)):
     db_invoice = models.FeeInvoice(
         student_id=invoice.student_id,
         amount=invoice.amount,
@@ -368,12 +399,21 @@ async def read_leaves(current_user: models.User = Depends(get_current_user), db:
     return result.scalars().all()
 
 @app.put("/hr/leaves/{id}/approve", response_model=schemas.LeaveRequestOut)
-async def approve_leave(id: str, status: str = "APPROVED", current_user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def approve_leave(id: str, status: str = "APPROVED", current_user: models.User = Depends(require_role(["HOD", "PRINCIPAL", "SUPER_ADMIN"])), db: AsyncSession = Depends(get_db)):
+    if status not in ["APPROVED", "REJECTED"]:
+        raise HTTPException(status_code=400, detail="Invalid status. Must be APPROVED or REJECTED.")
+
     result = await db.execute(select(models.LeaveRequest).where(models.LeaveRequest.id == id))
     leave = result.scalars().first()
     if not leave:
         raise HTTPException(status_code=404, detail="Leave request not found")
-        
+
+    if current_user.system_role == "HOD":
+        res_fac = await db.execute(select(models.User).where(models.User.id == leave.faculty_id))
+        faculty = res_fac.scalars().first()
+        if not faculty or faculty.department_id != current_user.department_id:
+            raise HTTPException(status_code=403, detail="HOD can only approve leaves of faculty members in their own department")
+
     leave.status = status
     leave.approved_by_id = current_user.id
     await db.commit()
@@ -388,7 +428,7 @@ async def approve_leave(id: str, status: str = "APPROVED", current_user: models.
 # --- ACADEMICS ENDPOINTS ---
 
 @app.post("/academics/courses", response_model=schemas.CourseOut)
-async def create_course(course: schemas.CourseCreate, db: AsyncSession = Depends(get_db)):
+async def create_course(course: schemas.CourseCreate, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "INSTITUTION_ADMIN", "PRINCIPAL", "HOD"])), db: AsyncSession = Depends(get_db)):
     db_course = models.Course(**course.dict())
     db.add(db_course)
     await db.commit()
@@ -396,7 +436,7 @@ async def create_course(course: schemas.CourseCreate, db: AsyncSession = Depends
     return db_course
 
 @app.get("/academics/courses", response_model=list[schemas.CourseOut])
-async def read_courses(db: AsyncSession = Depends(get_db)):
+async def read_courses(current_user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(models.Course))
     return result.scalars().all()
 
@@ -543,7 +583,7 @@ async def my_exams(current_user: models.User = Depends(get_current_user), db: As
     ]
 
 @app.post("/placements/drives", response_model=schemas.PlacementDriveOut)
-async def create_drive(drive: schemas.PlacementDriveCreate, db: AsyncSession = Depends(get_db)):
+async def create_drive(drive: schemas.PlacementDriveCreate, current_user: models.User = Depends(require_role(["PLACEMENT_OFFICER", "SUPER_ADMIN"])), db: AsyncSession = Depends(get_db)):
     db_drive = models.PlacementDrive(**drive.dict())
     db.add(db_drive)
     await db.commit()
@@ -566,12 +606,12 @@ async def request_gatepass(gp: schemas.GatepassRequestCreate, current_user: mode
     return db_gp
 
 @app.get("/campus/gatepass", response_model=list[schemas.GatepassRequestOut])
-async def list_gatepasses(db: AsyncSession = Depends(get_db)):
+async def list_gatepasses(current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "SECURITY_OFFICER"])), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(models.GatepassRequest).options(selectinload(models.GatepassRequest.student)))
     return result.scalars().all()
 
 @app.put("/campus/gatepass/{id}/approve")
-async def approve_gatepass(id: str, db: AsyncSession = Depends(get_db)):
+async def approve_gatepass(id: str, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "SECURITY_OFFICER", "HOSTEL_WARDEN"])), db: AsyncSession = Depends(get_db)):
     res = await db.execute(select(models.GatepassRequest).where(models.GatepassRequest.id == id))
     gp = res.scalars().first()
     if gp:
@@ -591,23 +631,10 @@ async def get_bulletin_posts(db: AsyncSession = Depends(get_db), current_user: m
     )
     posts = result.scalars().all()
     
-    role_map = {
-        "SUPER_ADMIN": "System Administrator",
-        "INSTITUTION_ADMIN": "Institution Admin",
-        "PRINCIPAL": "Principal",
-        "REGISTRAR": "Registrar",
-        "EXAM_CONTROLLER": "Controller of Examinations",
-        "ACCOUNTS": "Accounts Head",
-        "PLACEMENT_OFFICER": "Training & Placement Officer",
-        "HOD": "Head of Department",
-        "FACULTY": "Faculty Member",
-        "STUDENT": "Student"
-    }
-    
     out = []
     for p in posts:
         name = f"{p.author.first_name} {p.author.last_name}" if p.author else "Campus User"
-        role = role_map.get(p.author.system_role, "Staff") if p.author else "Staff"
+        role = ROLE_MAP.get(p.author.system_role, "Staff") if p.author else "Staff"
         out.append(schemas.BulletinPostOut(
             id=p.id,
             content=p.content,
@@ -621,7 +648,7 @@ async def get_bulletin_posts(db: AsyncSession = Depends(get_db), current_user: m
     return out
 
 @app.post("/bulletin", response_model=schemas.BulletinPostOut)
-async def create_bulletin_post(post: schemas.BulletinPostCreate, db: AsyncSession = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+async def create_bulletin_post(post: schemas.BulletinPostCreate, current_user: models.User = Depends(require_role(["SUPER_ADMIN", "INSTITUTION_ADMIN", "PRINCIPAL", "REGISTRAR", "EXAM_CONTROLLER", "ACCOUNTS", "PLACEMENT_OFFICER", "HOD", "FACULTY"])), db: AsyncSession = Depends(get_db)):
     from datetime import datetime
     db_post = models.BulletinPost(
         author_id=current_user.id,
@@ -634,20 +661,8 @@ async def create_bulletin_post(post: schemas.BulletinPostCreate, db: AsyncSessio
     await db.commit()
     await db.refresh(db_post)
     
-    role_map = {
-        "SUPER_ADMIN": "System Administrator",
-        "INSTITUTION_ADMIN": "Institution Admin",
-        "PRINCIPAL": "Principal",
-        "REGISTRAR": "Registrar",
-        "EXAM_CONTROLLER": "Controller of Examinations",
-        "ACCOUNTS": "Accounts Head",
-        "PLACEMENT_OFFICER": "Training & Placement Officer",
-        "HOD": "Head of Department",
-        "FACULTY": "Faculty Member",
-        "STUDENT": "Student"
-    }
     name = f"{current_user.first_name} {current_user.last_name}"
-    role = role_map.get(current_user.system_role, "Staff")
+    role = ROLE_MAP.get(current_user.system_role, "Staff")
     
     return schemas.BulletinPostOut(
         id=db_post.id,
@@ -668,14 +683,44 @@ async def get_job_tray(db: AsyncSession = Depends(get_db), current_user: models.
         "missed_punches": 0,
     }
     
-    if current_user.system_role in ["HOD", "PRINCIPAL"]:
-        res = await db.execute(select(models.LeaveRequest).where(models.LeaveRequest.status == "PENDING"))
-        tray["pending_leaves"] = len(res.scalars().all())
-        res = await db.execute(select(models.RequisitionTicket).where(models.RequisitionTicket.status == "PENDING"))
-        tray["pending_requisitions"] = len(res.scalars().all())
+    if current_user.system_role == "HOD":
+        stmt_leaves = (
+            select(func.count(models.LeaveRequest.id))
+            .join(models.User, models.LeaveRequest.faculty_id == models.User.id)
+            .where(
+                models.LeaveRequest.status == "PENDING",
+                models.User.department_id == current_user.department_id
+            )
+        )
+        tray["pending_leaves"] = await db.scalar(stmt_leaves) or 0
+        
+        stmt_reqs = (
+            select(func.count(models.RequisitionTicket.id))
+            .where(models.RequisitionTicket.status == "PENDING")
+        )
+        tray["pending_requisitions"] = await db.scalar(stmt_reqs) or 0
+        
+    elif current_user.system_role in ["PRINCIPAL", "SUPER_ADMIN", "REGISTRAR"]:
+        stmt_leaves = (
+            select(func.count(models.LeaveRequest.id))
+            .where(models.LeaveRequest.status == "PENDING")
+        )
+        tray["pending_leaves"] = await db.scalar(stmt_leaves) or 0
+        
+        stmt_reqs = (
+            select(func.count(models.RequisitionTicket.id))
+            .where(models.RequisitionTicket.status == "PENDING")
+        )
+        tray["pending_requisitions"] = await db.scalar(stmt_reqs) or 0
     else:
-        res = await db.execute(select(models.RequisitionTicket).where(models.RequisitionTicket.requester_id == current_user.id, models.RequisitionTicket.status == "PENDING"))
-        tray["pending_requisitions"] = len(res.scalars().all())
+        stmt_reqs = (
+            select(func.count(models.RequisitionTicket.id))
+            .where(
+                models.RequisitionTicket.requester_id == current_user.id,
+                models.RequisitionTicket.status == "PENDING"
+            )
+        )
+        tray["pending_requisitions"] = await db.scalar(stmt_reqs) or 0
 
     return tray
 
@@ -716,15 +761,8 @@ import hashlib
 from datetime import datetime
 from pydantic import BaseModel
 
-class ExamRecordCreate(BaseModel):
-    student_id: str
-    course_id: str
-    exam_type: str
-    marks_obtained: float
-    max_marks: float
-
 @app.post("/exams/records")
-async def save_exam_mark(record: ExamRecordCreate, db: AsyncSession = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+async def save_exam_mark(record: schemas.ExamRecordCreate, current_user: models.User = Depends(require_role(["FACULTY", "EXAM_CONTROLLER", "SUPER_ADMIN"])), db: AsyncSession = Depends(get_db)):
     # Check if record already exists
     res = await db.execute(select(models.ExamRecord).where(
         models.ExamRecord.student_id == record.student_id,
@@ -752,6 +790,67 @@ async def save_exam_mark(record: ExamRecordCreate, db: AsyncSession = Depends(ge
         db.add(db_record)
         
     await db.commit()
+
+    # Sync to ExamResult (Phase 5/6 model) and Recalculate CGPA (Criticism Point 7 & 9)
+    res_records = await db.execute(
+        select(models.ExamRecord).where(
+            models.ExamRecord.student_id == record.student_id,
+            models.ExamRecord.course_id == record.course_id
+        )
+    )
+    all_course_records = res_records.scalars().all()
+    
+    ise_sum = sum(r.marks_obtained for r in all_course_records if "ISE" in r.exam_type)
+    ese_val = sum(r.marks_obtained for r in all_course_records if "ESE" in r.exam_type)
+    total_val = ise_sum + ese_val
+    
+    # Grading Criteria
+    grade_val = 'F'
+    if total_val >= 90: grade_val = 'A+'
+    elif total_val >= 80: grade_val = 'A'
+    elif total_val >= 70: grade_val = 'B'
+    elif total_val >= 60: grade_val = 'C'
+    elif total_val >= 50: grade_val = 'D'
+    
+    res_result = await db.execute(
+        select(models.ExamResult).where(
+            models.ExamResult.student_id == record.student_id,
+            models.ExamResult.course_id == record.course_id
+        )
+    )
+    db_result = res_result.scalars().first()
+    
+    if db_result:
+        db_result.ise_marks = ise_sum
+        db_result.ese_marks = ese_val
+        db_result.total_marks = total_val
+        db_result.grade = grade_val
+    else:
+        db_result = models.ExamResult(
+            student_id=record.student_id,
+            course_id=record.course_id,
+            semester=1, 
+            ise_marks=ise_sum,
+            ese_marks=ese_val,
+            total_marks=total_val,
+            grade=grade_val
+        )
+        db.add(db_result)
+        
+    await db.commit()
+
+    # Recalculate CGPA on the profile mathematically correctly (Criticism Point 9)
+    prof_res = await db.execute(select(models.StudentProfile).where(models.StudentProfile.user_id == record.student_id))
+    profile = prof_res.scalars().first()
+    if profile:
+        all_results_res = await db.execute(select(models.ExamResult).where(models.ExamResult.student_id == record.student_id))
+        all_results = all_results_res.scalars().all()
+        if all_results:
+            cgpa_sum = sum((r.total_marks / 10.0) for r in all_results if r.total_marks is not None)
+            new_cgpa = round(cgpa_sum / len(all_results), 2)
+            profile.cgpa = str(max(0.0, min(10.0, new_cgpa)))
+            await db.commit()
+
     return {"status": "saved", "id": db_record.id}
 
 @app.post("/exams/publish")
@@ -778,12 +877,6 @@ async def publish_exams(course_id: Optional[str] = None, exam_type: Optional[str
     await db.commit()
     return {"status": "published_and_locked", "records_published": len(records)}
 
-# 2. SCHOLARSHIPS (Dual Approval)
-class ScholarshipCreate(BaseModel):
-    student_id: str
-    scholarship_name: str
-    amount: float
-
 @app.get("/scholarships")
 async def get_scholarships(db: AsyncSession = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     if current_user.system_role == "STUDENT":
@@ -793,14 +886,14 @@ async def get_scholarships(db: AsyncSession = Depends(get_db), current_user: mod
     return res.scalars().all()
 
 @app.post("/scholarships")
-async def apply_scholarship(sch: ScholarshipCreate, db: AsyncSession = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+async def apply_scholarship(sch: schemas.ScholarshipCreate, current_user: models.User = Depends(require_role(["STUDENT", "REGISTRAR", "SUPER_ADMIN"])), db: AsyncSession = Depends(get_db)):
     db_sch = models.ScholarshipLedger(**sch.dict(), status="PENDING_SCHOLARSHIP_SECTION")
     db.add(db_sch)
     await db.commit()
     return {"status": "created", "state": db_sch.status}
 
 @app.post("/scholarships/{id}/approve-section")
-async def approve_scholarship_section(id: str, db: AsyncSession = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+async def approve_scholarship_section(id: str, current_user: models.User = Depends(require_role(["REGISTRAR", "HOD", "SUPER_ADMIN"])), db: AsyncSession = Depends(get_db)):
     res = await db.execute(select(models.ScholarshipLedger).where(models.ScholarshipLedger.id == id))
     sch = res.scalars().first()
     if sch and sch.status == "PENDING_SCHOLARSHIP_SECTION":
@@ -810,10 +903,7 @@ async def approve_scholarship_section(id: str, db: AsyncSession = Depends(get_db
     return {"status": "success", "new_state": sch.status if sch else None}
 
 @app.post("/scholarships/{id}/approve-accounts")
-async def approve_scholarship_accounts(id: str, db: AsyncSession = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    if current_user.system_role not in ["ACCOUNTS", "SUPER_ADMIN", "PRINCIPAL"]:
-        raise HTTPException(status_code=403, detail="Only Accounts Head can give final financial approval.")
-        
+async def approve_scholarship_accounts(id: str, current_user: models.User = Depends(require_role(["ACCOUNTS", "SUPER_ADMIN", "PRINCIPAL"])), db: AsyncSession = Depends(get_db)):
     res = await db.execute(select(models.ScholarshipLedger).where(models.ScholarshipLedger.id == id))
     sch = res.scalars().first()
     if sch and sch.status == "PENDING_ACCOUNTS":
@@ -824,30 +914,60 @@ async def approve_scholarship_accounts(id: str, db: AsyncSession = Depends(get_d
 
 
 # 3. PLACEMENTS
-class PlacementDriveCreate(BaseModel):
-    company_name: str
-    role: str
-    ctc: str
-    min_cgpa: float
-    drive_date: str
-
-@app.post("/placements/drives")
-async def create_drive(drive: PlacementDriveCreate, db: AsyncSession = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    db_drive = models.PlacementDrive(**drive.dict())
-    db.add(db_drive)
-    await db.commit()
-    return {"status": "created"}
-
 @app.post("/placements/apply")
-async def apply_drive(drive_id: str, db: AsyncSession = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+async def apply_drive(drive_id: str, db: AsyncSession = Depends(get_db), current_user: models.User = Depends(require_role(["STUDENT"]))):
+    result_student = await db.execute(
+        select(models.StudentProfile).where(models.StudentProfile.user_id == current_user.id)
+    )
+    student = result_student.scalars().first()
+    if not student:
+        raise HTTPException(status_code=400, detail="Only students with a profile can apply for placement drives")
+
+    result_drive = await db.execute(
+        select(models.PlacementDrive).where(models.PlacementDrive.id == drive_id)
+    )
+    drive = result_drive.scalars().first()
+    if not drive:
+        raise HTTPException(status_code=404, detail="Placement drive not found")
+
+    try:
+        student_cgpa = float(student.cgpa)
+    except Exception:
+        student_cgpa = 0.0
+
+    if student_cgpa < drive.min_cgpa:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Ineligible: Your CGPA ({student_cgpa}) is below the minimum required CGPA ({drive.min_cgpa}) for this drive."
+        )
+
+    if drive.eligible_departments:
+        allowed_depts = [d.strip().upper() for d in drive.eligible_departments.split(",")]
+        result_dept = await db.execute(select(models.Department).where(models.Department.id == current_user.department_id))
+        dept = result_dept.scalars().first()
+        if not dept or dept.code.upper() not in allowed_depts:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Ineligible: Your department ({dept.code if dept else 'N/A'}) is not eligible for this drive."
+            )
+
+    result_exist = await db.execute(
+        select(models.PlacementApplication).where(
+            models.PlacementApplication.drive_id == drive_id,
+            models.PlacementApplication.student_id == current_user.id
+        )
+    )
+    if result_exist.scalars().first():
+        raise HTTPException(status_code=400, detail="You have already applied for this placement drive")
+
     app = models.PlacementApplication(drive_id=drive_id, student_id=current_user.id)
     db.add(app)
     await db.commit()
     return {"status": "applied"}
 
-@app.get("/placements/drives")
+@app.get("/placements/drives", response_model=list[schemas.PlacementDriveOut])
 async def get_drives(db: AsyncSession = Depends(get_db), current_user: models.User = Depends(get_current_user)):
-    res = await db.execute(select(models.PlacementDrive))
+    res = await db.execute(select(models.PlacementDrive).order_by(models.PlacementDrive.drive_date.asc()))
     return res.scalars().all()
 
 if __name__ == "__main__":

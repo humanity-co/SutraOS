@@ -280,3 +280,15 @@ class RequisitionTicketOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+class ExamRecordCreate(BaseModel):
+    student_id: str
+    course_id: str
+    exam_type: str
+    marks_obtained: float
+    max_marks: float
+
+class ScholarshipCreate(BaseModel):
+    student_id: str
+    scholarship_name: str
+    amount: float

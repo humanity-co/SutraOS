@@ -52,6 +52,23 @@ HODS = [
 ]
 
 async def seed_data():
+    import sys
+    from sqlalchemy import text
+    db_exists = False
+    try:
+        async with async_session() as session:
+            res = await session.execute(text("SELECT COUNT(*) FROM users"))
+            count = res.scalar()
+            if count and count > 0:
+                db_exists = True
+    except Exception:
+        pass
+
+    force = "--force" in sys.argv
+    if db_exists and not force:
+        print("Database already contains data. Seeding aborted. Use '--force' flag to drop and recreate.")
+        return
+
     # Recreate tables so schema changes are applied on disk
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
@@ -59,7 +76,7 @@ async def seed_data():
         
     async with async_session() as session:
         
-        print("Cleared existing DB.")
+        print("Cleared existing DB and created tables.")
         
         dept_map = {}
         for d in DEPARTMENTS:
