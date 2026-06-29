@@ -93,6 +93,7 @@ export default function Facilities({ setAuthToken }: { setAuthToken: (t: string 
   const [gatepasses, setGatepasses] = useState<Gatepass[]>([]);
   const [wardenGatepasses, setWardenGatepasses] = useState<any[]>([]);
   const [loadingHostel, setLoadingHostel] = useState(false);
+  const [activeHostelSubTab, setActiveHostelSubTab] = useState<'booking' | 'outing'>('booking');
 
   const [hostelForm, setHostelForm] = useState({
     courseYear: 'VI',
@@ -451,317 +452,352 @@ export default function Facilities({ setAuthToken }: { setAuthToken: (t: string 
             <div className="space-y-8">
               
               {role === 'STUDENT' ? (
-                <>
-                  {!hostelAdmission ? (
-                    // HOSTEL REGISTRATION FORM
-                    <form onSubmit={handleHostelRegister} className="space-y-6">
-                      <div className="border-b border-slate-100 pb-4">
-                        <h3 className="text-xl font-bold text-slate-800">Facilities - Hostel - Hostel Registration</h3>
-                      </div>
+                <div className="space-y-6">
+                  {/* Hostel Student Sub-Tabs */}
+                  <div className="flex bg-slate-100 p-1 rounded-2xl border border-slate-200/50 max-w-sm">
+                    <button
+                      onClick={() => setActiveHostelSubTab('booking')}
+                      className={`flex-1 py-2 px-4 rounded-xl text-xs font-bold transition-all ${
+                        activeHostelSubTab === 'booking' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      Hostel Booking
+                    </button>
+                    <button
+                      onClick={() => setActiveHostelSubTab('outing')}
+                      className={`flex-1 py-2 px-4 rounded-xl text-xs font-bold transition-all ${
+                        activeHostelSubTab === 'outing' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'
+                      }`}
+                    >
+                      Leave Outings & Gatepasses
+                    </button>
+                  </div>
 
-                      {/* Course / Gender Details */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Course Year *</label>
-                          <select
-                            value={hostelForm.courseYear}
-                            onChange={(e) => setHostelForm({...hostelForm, courseYear: e.target.value})}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 font-medium"
+                  {activeHostelSubTab === 'booking' ? (
+                    <>
+                      {!hostelAdmission ? (
+                        // HOSTEL REGISTRATION FORM
+                        <form onSubmit={handleHostelRegister} className="space-y-6">
+                          <div className="border-b border-slate-100 pb-4">
+                            <h3 className="text-xl font-bold text-slate-800">Facilities - Hostel - Hostel Registration</h3>
+                          </div>
+
+                          {/* Course / Gender Details */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Course Year *</label>
+                              <select
+                                value={hostelForm.courseYear}
+                                onChange={(e) => setHostelForm({...hostelForm, courseYear: e.target.value})}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 font-medium"
+                              >
+                                <option>IV</option>
+                                <option>V</option>
+                                <option>VI</option>
+                                <option>VII</option>
+                                <option>VIII</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Gender *</label>
+                              <select
+                                value={hostelForm.gender}
+                                onChange={(e) => setHostelForm({...hostelForm, gender: e.target.value})}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 font-medium"
+                              >
+                                <option>Male</option>
+                                <option>Female</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          {/* Policy & Plan selections */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                              <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Policy Name *</label>
+                              <select
+                                value={hostelForm.policyName}
+                                onChange={(e) => setHostelForm({...hostelForm, policyName: e.target.value})}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 font-medium"
+                              >
+                                <option>MIT Aurangabad Hostel Policy</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Plan Name *</label>
+                              <select
+                                value={hostelForm.planName}
+                                onChange={(e) => setHostelForm({...hostelForm, planName: e.target.value})}
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 font-medium"
+                              >
+                                <option>Hostel Plan 2025-2026</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          {/* Parent Details */}
+                          <div className="space-y-4 pt-4 border-t border-slate-100">
+                            <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wide">Family & Guardian Contact Details</h4>
+                            
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-2">Father Name *</label>
+                                <input
+                                  type="text"
+                                  required
+                                  value={hostelForm.fatherName}
+                                  onChange={(e) => setHostelForm({...hostelForm, fatherName: e.target.value})}
+                                  placeholder="Father Full Name"
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-2">Father Contact *</label>
+                                <input
+                                  type="text"
+                                  required
+                                  value={hostelForm.fatherContact}
+                                  onChange={(e) => setHostelForm({...hostelForm, fatherContact: e.target.value})}
+                                  placeholder="Phone Number"
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm"
+                                />
+                              </div>
+                            </div>
+                            <div>
+                              <label className="block text-xs font-bold text-slate-500 mb-2">Father Address *</label>
+                              <input
+                                type="text"
+                                required
+                                value={hostelForm.fatherAddress}
+                                onChange={(e) => setHostelForm({...hostelForm, fatherAddress: e.target.value})}
+                                placeholder="Residential Address"
+                                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm"
+                              />
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                              <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-2">Mother Name *</label>
+                                <input
+                                  type="text"
+                                  required
+                                  value={hostelForm.motherName}
+                                  onChange={(e) => setHostelForm({...hostelForm, motherName: e.target.value})}
+                                  placeholder="Mother Full Name"
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-2">Mother Contact *</label>
+                                <input
+                                  type="text"
+                                  required
+                                  value={hostelForm.motherContact}
+                                  onChange={(e) => setHostelForm({...hostelForm, motherContact: e.target.value})}
+                                  placeholder="Phone Number"
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm"
+                                />
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Building Allocation Choice */}
+                          <div className="space-y-4 pt-4 border-t border-slate-100">
+                            <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wide">Building Preference</h4>
+                            <div className="grid grid-cols-3 gap-4">
+                              <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-2">Building *</label>
+                                <select
+                                  value={hostelForm.buildingName}
+                                  onChange={(e) => setHostelForm({...hostelForm, buildingName: e.target.value})}
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium"
+                                >
+                                  <option>Aryabhata Block A</option>
+                                  <option>Aryabhata Block B</option>
+                                  <option>Bhaskara Boys Block</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-2">Floor *</label>
+                                <select
+                                  value={hostelForm.floorName}
+                                  onChange={(e) => setHostelForm({...hostelForm, floorName: e.target.value})}
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium"
+                                >
+                                  <option>Floor 1</option>
+                                  <option>Floor 2</option>
+                                  <option>Floor 3</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-2">Room *</label>
+                                <select
+                                  value={hostelForm.roomName}
+                                  onChange={(e) => setHostelForm({...hostelForm, roomName: e.target.value})}
+                                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium"
+                                >
+                                  <option>Room 101</option>
+                                  <option>Room 102</option>
+                                  <option>Room 201</option>
+                                  <option>Room 202</option>
+                                </select>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Rules acceptance */}
+                          <div className="flex items-start gap-3 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                            <input
+                              type="checkbox"
+                              id="acceptRules"
+                              checked={hostelForm.acceptRules}
+                              onChange={(e) => setHostelForm({...hostelForm, acceptRules: e.target.checked})}
+                              className="mt-1 rounded text-blue-600 focus:ring-blue-500 border-slate-300"
+                            />
+                            <label htmlFor="acceptRules" className="text-xs font-semibold text-slate-600 leading-relaxed cursor-pointer">
+                              I agree that all information entered is true to my knowledge and I agree to strictly abide by the guidelines, codes of conduct, and policies set forth by the MIT Aurangabad Hostel board of trustees.
+                            </label>
+                          </div>
+
+                          <button
+                            type="submit"
+                            className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl transition-all shadow-md shadow-blue-500/10 text-sm"
                           >
-                            <option>IV</option>
-                            <option>V</option>
-                            <option>VI</option>
-                            <option>VII</option>
-                            <option>VIII</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Gender *</label>
-                          <select
-                            value={hostelForm.gender}
-                            onChange={(e) => setHostelForm({...hostelForm, gender: e.target.value})}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 font-medium"
-                          >
-                            <option>Male</option>
-                            <option>Female</option>
-                          </select>
-                        </div>
-                      </div>
-
-                      {/* Policy & Plan selections */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div>
-                          <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Policy Name *</label>
-                          <select
-                            value={hostelForm.policyName}
-                            onChange={(e) => setHostelForm({...hostelForm, policyName: e.target.value})}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 font-medium"
-                          >
-                            <option>MIT Aurangabad Hostel Policy</option>
-                          </select>
-                        </div>
-                        <div>
-                          <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Plan Name *</label>
-                          <select
-                            value={hostelForm.planName}
-                            onChange={(e) => setHostelForm({...hostelForm, planName: e.target.value})}
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:border-blue-500 font-medium"
-                          >
-                            <option>Hostel Plan 2025-2026</option>
-                          </select>
-                        </div>
-                      </div>
-
-                      {/* Parent Details */}
-                      <div className="space-y-4 pt-4 border-t border-slate-100">
-                        <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wide">Family & Guardian Contact Details</h4>
-                        
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                          <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-2">Father Name *</label>
-                            <input
-                              type="text"
-                              required
-                              value={hostelForm.fatherName}
-                              onChange={(e) => setHostelForm({...hostelForm, fatherName: e.target.value})}
-                              placeholder="Father Full Name"
-                              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-2">Father Contact *</label>
-                            <input
-                              type="text"
-                              required
-                              value={hostelForm.fatherContact}
-                              onChange={(e) => setHostelForm({...hostelForm, fatherContact: e.target.value})}
-                              placeholder="Phone Number"
-                              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm"
-                            />
-                          </div>
-                        </div>
-                        <div>
-                          <label className="block text-xs font-bold text-slate-500 mb-2">Father Address *</label>
-                          <input
-                            type="text"
-                            required
-                            value={hostelForm.fatherAddress}
-                            onChange={(e) => setHostelForm({...hostelForm, fatherAddress: e.target.value})}
-                            placeholder="Residential Address"
-                            className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm"
-                          />
-                        </div>
-
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
-                          <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-2">Mother Name *</label>
-                            <input
-                              type="text"
-                              required
-                              value={hostelForm.motherName}
-                              onChange={(e) => setHostelForm({...hostelForm, motherName: e.target.value})}
-                              placeholder="Mother Full Name"
-                              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-2">Mother Contact *</label>
-                            <input
-                              type="text"
-                              required
-                              value={hostelForm.motherContact}
-                              onChange={(e) => setHostelForm({...hostelForm, motherContact: e.target.value})}
-                              placeholder="Phone Number"
-                              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm"
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Building Allocation Choice */}
-                      <div className="space-y-4 pt-4 border-t border-slate-100">
-                        <h4 className="text-sm font-bold text-slate-700 uppercase tracking-wide">Building Preference</h4>
-                        <div className="grid grid-cols-3 gap-4">
-                          <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-2">Building *</label>
-                            <select
-                              value={hostelForm.buildingName}
-                              onChange={(e) => setHostelForm({...hostelForm, buildingName: e.target.value})}
-                              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium"
-                            >
-                              <option>Aryabhata Block A</option>
-                              <option>Aryabhata Block B</option>
-                              <option>Bhaskara Boys Block</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-2">Floor *</label>
-                            <select
-                              value={hostelForm.floorName}
-                              onChange={(e) => setHostelForm({...hostelForm, floorName: e.target.value})}
-                              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium"
-                            >
-                              <option>Floor 1</option>
-                              <option>Floor 2</option>
-                              <option>Floor 3</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-2">Room *</label>
-                            <select
-                              value={hostelForm.roomName}
-                              onChange={(e) => setHostelForm({...hostelForm, roomName: e.target.value})}
-                              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 text-sm font-medium"
-                            >
-                              <option>Room 101</option>
-                              <option>Room 102</option>
-                              <option>Room 201</option>
-                              <option>Room 202</option>
-                            </select>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Rules acceptance */}
-                      <div className="flex items-start gap-3 bg-slate-50 p-4 rounded-xl border border-slate-100">
-                        <input
-                          type="checkbox"
-                          id="acceptRules"
-                          checked={hostelForm.acceptRules}
-                          onChange={(e) => setHostelForm({...hostelForm, acceptRules: e.target.checked})}
-                          className="mt-1 rounded text-blue-600 focus:ring-blue-500 border-slate-300"
-                        />
-                        <label htmlFor="acceptRules" className="text-xs font-semibold text-slate-600 leading-relaxed cursor-pointer">
-                          I agree that all information entered is true to my knowledge and I agree to strictly abide by the guidelines, codes of conduct, and policies set forth by the MIT Aurangabad Hostel board of trustees.
-                        </label>
-                      </div>
-
-                      <button
-                        type="submit"
-                        className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl transition-all shadow-md shadow-blue-500/10 text-sm"
-                      >
-                        Enroll and Generate Fee Invoice
-                      </button>
-                    </form>
-                  ) : (
-                    // ACTIVE ADMISSION CARD
-                    <div className="space-y-6">
-                      <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-6 max-w-lg space-y-4">
-                        <div className="flex justify-between items-center border-b border-slate-200 pb-3">
-                          <div>
-                            <h3 className="text-lg font-bold text-slate-800">Hostel Allocation</h3>
-                            <p className="text-sm font-semibold text-slate-400">Active Resident Profile</p>
-                          </div>
-                          <span className="bg-emerald-50 text-emerald-600 text-xs font-extrabold uppercase px-3 py-1 rounded-lg border border-emerald-100">
-                            Registered
-                          </span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-4 text-xs font-semibold text-slate-500">
-                          <div>Building Block Name: <span className="text-slate-700 font-bold">{hostelAdmission.block_name}</span></div>
-                          <div>Room Number: <span className="text-slate-700 font-bold">{hostelAdmission.room_number}</span></div>
-                          <div>Parent Outing Permission: <span className={`font-bold ${hostelAdmission.parent_consent_approved ? 'text-emerald-600' : 'text-rose-600'}`}>
-                            {hostelAdmission.parent_consent_approved ? 'Granted' : 'Denied / Restrained'}
-                          </span></div>
-                        </div>
-                      </div>
-
-                      {/* OUTING / GATEPASS FORM FOR RESIDENT STUDENT */}
-                      <div className="border-t border-slate-100 pt-6 space-y-4">
-                        <h3 className="text-lg font-bold text-slate-800">Request Leave Outing Gatepass</h3>
-                        <form onSubmit={handleRequestOuting} className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end bg-slate-50 p-5 rounded-2xl border border-slate-100">
-                          <div className="md:col-span-1">
-                            <label className="block text-xs font-bold text-slate-500 mb-2">Reason for Outing</label>
-                            <input
-                              type="text"
-                              required
-                              value={outingForm.reason}
-                              onChange={(e) => setOutingForm({...outingForm, reason: e.target.value})}
-                              placeholder="e.g. Health checkup / visiting parents"
-                              className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-2">Out Date & Time</label>
-                            <input
-                              type="datetime-local"
-                              required
-                              value={outingForm.outDate}
-                              onChange={(e) => setOutingForm({...outingForm, outDate: e.target.value})}
-                              className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-medium"
-                            />
-                          </div>
-                          <div>
-                            <label className="block text-xs font-bold text-slate-500 mb-2">Return Date & Time</label>
-                            <input
-                              type="datetime-local"
-                              required
-                              value={outingForm.inDate}
-                              onChange={(e) => setOutingForm({...outingForm, inDate: e.target.value})}
-                              className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-medium"
-                            />
-                          </div>
-                          <div className="md:col-span-3 pt-2 flex justify-end">
-                            <button
-                              type="submit"
-                              className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-6 rounded-xl transition-all shadow-md shadow-blue-500/10 text-sm"
-                            >
-                              Submit Outing Request
-                            </button>
-                          </div>
+                            Enroll and Generate Fee Invoice
+                          </button>
                         </form>
-                      </div>
-
-                      {/* OUTING LIST FOR STUDENT */}
-                      <div className="space-y-3">
-                        <h4 className="text-base font-bold text-slate-800">My Outing History</h4>
-                        <div className="overflow-x-auto">
-                          <table className="w-full text-left border-collapse">
-                            <thead>
-                              <tr className="bg-slate-50 border-b border-slate-200">
-                                <th className="p-4 text-xs font-bold text-slate-500 uppercase">Reason</th>
-                                <th className="p-4 text-xs font-bold text-slate-500 uppercase">Out Date</th>
-                                <th className="p-4 text-xs font-bold text-slate-500 uppercase">In Date</th>
-                                <th className="p-4 text-xs font-bold text-slate-500 uppercase">Security Check</th>
-                                <th className="p-4 text-xs font-bold text-slate-500 uppercase">Parental Consent Gate</th>
-                              </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                              {gatepasses.length === 0 ? (
-                                <tr>
-                                  <td colSpan={5} className="p-4 text-center text-sm font-semibold text-slate-400">No outing records found.</td>
-                                </tr>
-                              ) : (
-                                gatepasses.map(gp => (
-                                  <tr key={gp.id} className="hover:bg-slate-50/50">
-                                    <td className="p-4 text-sm font-bold text-slate-700">{gp.reason}</td>
-                                    <td className="p-4 text-xs font-semibold text-slate-500">{new Date(gp.out_date).toLocaleString()}</td>
-                                    <td className="p-4 text-xs font-semibold text-slate-500">{new Date(gp.in_date).toLocaleString()}</td>
-                                    <td className="p-4 text-xs">
-                                      <span className={`px-2 py-0.5 rounded-lg text-xs font-extrabold uppercase ${
-                                        gp.status === 'APPROVED' ? 'bg-emerald-50 text-emerald-600' :
-                                        gp.status === 'REJECTED' ? 'bg-rose-50 text-rose-600' : 'bg-amber-50 text-amber-600'
-                                      }`}>
-                                        {gp.status}
-                                      </span>
-                                    </td>
-                                    <td className="p-4 text-xs font-bold">
-                                      {gp.signature_verified ? (
-                                        <span className="text-emerald-600">Verified & Approved</span>
-                                      ) : (
-                                        <span className="text-slate-400">No Action Required</span>
-                                      )}
-                                    </td>
-                                  </tr>
-                                ))
-                              )}
-                            </tbody>
-                          </table>
+                      ) : (
+                        // ACTIVE ADMISSION CARD
+                        <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-6 max-w-lg space-y-4">
+                          <div className="flex justify-between items-center border-b border-slate-200 pb-3">
+                            <div>
+                              <h3 className="text-lg font-bold text-slate-800">Hostel Allocation</h3>
+                              <p className="text-sm font-semibold text-slate-400">Active Resident Profile</p>
+                            </div>
+                            <span className="bg-emerald-50 text-emerald-600 text-xs font-extrabold uppercase px-3 py-1 rounded-lg border border-emerald-100">
+                              Registered
+                            </span>
+                          </div>
+                          <div className="grid grid-cols-2 gap-4 text-xs font-semibold text-slate-500">
+                            <div>Building Block Name: <span className="text-slate-700 font-bold">{hostelAdmission.block_name}</span></div>
+                            <div>Room Number: <span className="text-slate-700 font-bold">{hostelAdmission.room_number}</span></div>
+                            <div>Parent Outing Permission: <span className={`font-bold ${hostelAdmission.parent_consent_approved ? 'text-emerald-600' : 'text-rose-600'}`}>
+                              {hostelAdmission.parent_consent_approved ? 'Granted' : 'Denied / Restrained'}
+                            </span></div>
+                          </div>
                         </div>
-                      </div>
+                      )}
+                    </>
+                  ) : (
+                    // OUTING / GATEPASS SECTION
+                    <>
+                      {!hostelAdmission ? (
+                        <div className="bg-amber-50 border border-amber-200 rounded-2xl p-6 text-center space-y-3">
+                          <h4 className="text-base font-bold text-amber-800">Access Denied</h4>
+                          <p className="text-sm font-semibold text-amber-600">
+                            You must complete your Hostel Room Booking and register for the hostel first before you can request leave outing gatepasses.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-6">
+                          {/* OUTING / GATEPASS FORM FOR RESIDENT STUDENT */}
+                          <div className="space-y-4">
+                            <h3 className="text-lg font-bold text-slate-800">Request Leave Outing Gatepass</h3>
+                            <form onSubmit={handleRequestOuting} className="grid grid-cols-1 md:grid-cols-3 gap-4 items-end bg-slate-50 p-5 rounded-2xl border border-slate-100">
+                              <div className="md:col-span-1">
+                                <label className="block text-xs font-bold text-slate-500 mb-2">Reason for Outing</label>
+                                <input
+                                  type="text"
+                                  required
+                                  value={outingForm.reason}
+                                  onChange={(e) => setOutingForm({...outingForm, reason: e.target.value})}
+                                  placeholder="e.g. Health checkup / visiting parents"
+                                  className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-2">Out Date & Time</label>
+                                <input
+                                  type="datetime-local"
+                                  required
+                                  value={outingForm.outDate}
+                                  onChange={(e) => setOutingForm({...outingForm, outDate: e.target.value})}
+                                  className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-medium"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-xs font-bold text-slate-500 mb-2">Return Date & Time</label>
+                                <input
+                                  type="datetime-local"
+                                  required
+                                  value={outingForm.inDate}
+                                  onChange={(e) => setOutingForm({...outingForm, inDate: e.target.value})}
+                                  className="w-full bg-white border border-slate-200 rounded-xl px-4 py-2 text-sm font-medium"
+                                />
+                              </div>
+                              <div className="md:col-span-3 pt-2 flex justify-end">
+                                <button
+                                  type="submit"
+                                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-6 rounded-xl transition-all shadow-md shadow-blue-500/10 text-sm"
+                                >
+                                  Submit Outing Request
+                                </button>
+                              </div>
+                            </form>
+                          </div>
 
-                    </div>
+                          {/* OUTING LIST FOR STUDENT */}
+                          <div className="space-y-3">
+                            <h4 className="text-base font-bold text-slate-800">My Outing History</h4>
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-left border-collapse">
+                                <thead>
+                                  <tr className="bg-slate-50 border-b border-slate-200">
+                                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">Reason</th>
+                                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">Out Date</th>
+                                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">In Date</th>
+                                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">Security Check</th>
+                                    <th className="p-4 text-xs font-bold text-slate-500 uppercase">Parental Consent Gate</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                  {gatepasses.length === 0 ? (
+                                    <tr>
+                                      <td colSpan={5} className="p-4 text-center text-sm font-semibold text-slate-400">No outing records found.</td>
+                                    </tr>
+                                  ) : (
+                                    gatepasses.map(gp => (
+                                      <tr key={gp.id} className="hover:bg-slate-50/50">
+                                        <td className="p-4 text-sm font-bold text-slate-700">{gp.reason}</td>
+                                        <td className="p-4 text-xs font-semibold text-slate-500">{new Date(gp.out_date).toLocaleString()}</td>
+                                        <td className="p-4 text-xs font-semibold text-slate-500">{new Date(gp.in_date).toLocaleString()}</td>
+                                        <td className="p-4 text-xs">
+                                          <span className={`px-2 py-0.5 rounded-lg text-xs font-extrabold uppercase ${
+                                            gp.status === 'APPROVED' ? 'bg-emerald-50 text-emerald-600' :
+                                            gp.status === 'REJECTED' ? 'bg-rose-50 text-rose-600' : 'bg-amber-50 text-amber-600'
+                                          }`}>
+                                            {gp.status}
+                                          </span>
+                                        </td>
+                                        <td className="p-4 text-xs font-bold">
+                                          {gp.signature_verified ? (
+                                            <span className="text-emerald-600">Verified & Approved</span>
+                                          ) : (
+                                            <span className="text-slate-400">No Action Required</span>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    ))
+                                  )}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </>
                   )}
-                </>
+                </div>
               ) : (
                 // WARDEN / ADMIN LIST GATEPASSES FOR APPROVAL
                 <div className="space-y-4">

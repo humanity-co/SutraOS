@@ -667,9 +667,14 @@ async def request_gatepass(gp: schemas.GatepassRequestCreate, current_user: mode
     # Check if student is admitted to hostel
     res_adm = await db.execute(select(models.HostelAdmission).where(models.HostelAdmission.student_id == current_user.id))
     adm = res_adm.scalars().first()
+    if not adm:
+        raise HTTPException(
+            status_code=400,
+            detail="Hostel Block: You must be registered and admitted to the hostel to request a gatepass."
+        )
     
-    # If they reside in a hostel, verify parental consent
-    if adm and not adm.parent_consent_approved:
+    # Verify parental consent
+    if not adm.parent_consent_approved:
         raise HTTPException(
             status_code=400,
             detail="Approval Blocked: Parental consent has been denied for this outing."
