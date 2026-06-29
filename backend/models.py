@@ -32,6 +32,8 @@ class User(Base):
     system_role = Column(String, nullable=False)
     additional_roles = Column(JSON, default=[])
     is_active = Column(Boolean, default=True)
+    public_key = Column(String, nullable=True)
+    private_key = Column(String, nullable=True)
     
     department_id = Column(String, ForeignKey("departments.id"), nullable=True)
     department = relationship("Department", back_populates="users")
@@ -219,9 +221,11 @@ class ExamRecord(Base):
     max_marks = Column(Float, nullable=False)
     is_published = Column(Boolean, default=False)
     cryptographic_hash = Column(String, nullable=True) # SHA-256 hash of student_id + marks + salt to prevent tampering
+    signature = Column(String, nullable=True)
+    signature_verified = Column(Boolean, default=False)
 
     course = relationship("Course")
-    student = relationship("User")
+    student = relationship("User", foreign_keys=[student_id])
 
 class ExamAuditLog(Base):
     __tablename__ = "exam_audit_logs"

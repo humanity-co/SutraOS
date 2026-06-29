@@ -11,9 +11,51 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
-DATABASE_URL = "sqlite+aiosqlite:///./sutraos.db"
+import os
+DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///./sutraos.db")
 
-engine = create_async_engine(DATABASE_URL, echo=False)
+if "sqlite" in DATABASE_URL:
+    engine = create_async_engine(DATABASE_URL, echo=False, connect_args={"check_same_thread": False})
+else:
+    engine = create_async_engine(DATABASE_URL, echo=False)
+
+try:
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.hazmat.primitives import serialization
+    HAS_CRYPTOGRAPHY = True
+except ImportError:
+    HAS_CRYPTOGRAPHY = False
+
+def generate_key_pair():
+    if HAS_CRYPTOGRAPHY:
+        try:
+            private_key = rsa.generate_private_key(
+                public_exponent=65537,
+                key_size=2048
+            )
+            private_pem = private_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption()
+            ).decode("utf-8")
+            
+            public_pem = private_key.public_key().public_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PublicFormat.SubjectPublicKeyInfo
+            ).decode("utf-8")
+            
+            return private_pem, public_pem
+        except Exception:
+            pass
+    
+    # Fallback pseudo-keys
+    import hashlib
+    import uuid
+    seed = str(uuid.uuid4())
+    private_pem = f"-----BEGIN PRIVATE KEY-----\nMOCK_PRIVATE_KEY_{hashlib.sha256(seed.encode()).hexdigest()}\n-----END PRIVATE KEY-----"
+    public_pem = f"-----BEGIN PUBLIC KEY-----\nMOCK_PUBLIC_KEY_{hashlib.sha256((seed + '_pub').encode()).hexdigest()}\n-----END PUBLIC KEY-----"
+    return private_pem, public_pem
+
 async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 # Departments list
@@ -93,6 +135,7 @@ async def seed_data():
         # 1. Core Users
         all_users = []
         for u in USERS_TO_CREATE + HODS:
+            priv, pub = generate_key_pair()
             user = User(
                 username=u['username'],
                 hashed_password=default_hash,
@@ -100,7 +143,9 @@ async def seed_data():
                 system_role=u['role'],
                 first_name=u['first_name'],
                 last_name=u['last_name'],
-                department_id=dept_map.get(u.get('dept'))
+                department_id=dept_map.get(u.get('dept')),
+                private_key=priv,
+                public_key=pub
             )
             session.add(user)
             await session.commit()
@@ -115,6 +160,7 @@ async def seed_data():
         # 2. Add some Faculty
         faculty_users = []
         for i, dept_code in enumerate(dept_map.keys()):
+            priv, pub = generate_key_pair()
             user = User(
                 username=f"faculty_{dept_code.lower()}_{i}",
                 hashed_password=default_hash,
@@ -122,7 +168,9 @@ async def seed_data():
                 system_role="FACULTY",
                 first_name="Prof.",
                 last_name=f"Faculty {dept_code}",
-                department_id=dept_map[dept_code]
+                department_id=dept_map[dept_code],
+                private_key=priv,
+                public_key=pub
             )
             session.add(user)
             await session.commit()
@@ -147,6 +195,7 @@ async def seed_data():
         for i in range(1, 21):
             dept_code = list(dept_map.keys())[i % len(dept_map)]
             roll = f"MIT2024{dept_code}{str(i).zfill(3)}"
+            priv, pub = generate_key_pair()
             user = User(
                 username=roll.lower(),
                 hashed_password=default_hash,
@@ -154,7 +203,9 @@ async def seed_data():
                 system_role="STUDENT",
                 first_name="Student",
                 last_name=f"{i}",
-                department_id=dept_map[dept_code]
+                department_id=dept_map[dept_code],
+                private_key=priv,
+                public_key=pub
             )
             session.add(user)
             await session.commit()

@@ -6,12 +6,18 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 # We will use SQLite for initial rapid setup, then swap to Postgres as needed.
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite+aiosqlite:///./sutraos.db")
 
-engine = create_async_engine(
-    DATABASE_URL, 
-    echo=True, 
-    # check_same_thread is needed only for sqlite
-    connect_args={"check_same_thread": False} if "sqlite" in DATABASE_URL else {}
-)
+if "sqlite" in DATABASE_URL:
+    engine_args = {"connect_args": {"check_same_thread": False}}
+else:
+    engine_args = {
+        "pool_size": 20,
+        "max_overflow": 10,
+        "pool_timeout": 30,
+        "pool_recycle": 1800,
+        "pool_pre_ping": True
+    }
+
+engine = create_async_engine(DATABASE_URL, echo=False, **engine_args)
 
 SessionLocal = sessionmaker(
     bind=engine, 
