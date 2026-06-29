@@ -1171,6 +1171,16 @@ async def reserve_seat(reserve: schemas.TransportReservationCreate, current_user
     if not route:
         raise HTTPException(status_code=404, detail="Bus route not found")
         
+    # Check if already reserved
+    res_exist = await db.execute(
+        select(models.TransportReservation).where(
+            models.TransportReservation.student_id == current_user.id,
+            models.TransportReservation.route_id == reserve.route_id
+        )
+    )
+    if res_exist.scalars().first():
+        raise HTTPException(status_code=400, detail="You have already reserved a seat on this route")
+
     if route.reserved_seats >= route.capacity:
         raise HTTPException(
             status_code=400,
@@ -1185,8 +1195,17 @@ async def reserve_seat(reserve: schemas.TransportReservationCreate, current_user
         seat_number=route.reserved_seats,
         reserved_at=datetime.utcnow().isoformat() + "Z"
     )
-    
     db.add(db_reserve)
+    
+    # Automatically generate transport fee invoice (connected finance)
+    fee = models.FeeInvoice(
+        student_id=current_user.id,
+        amount=12000.0,
+        description=f"Transport Fees - Route: {route.route_name} ({route.bus_number})",
+        status="PENDING"
+    )
+    db.add(fee)
+    
     await db.commit()
     await db.refresh(db_reserve)
     
@@ -1209,9 +1228,27 @@ async def list_my_reservations(current_user: models.User = Depends(require_role(
 
 # --- HOSTEL ROUTING ---
 @app.post("/hostel/admissions", response_model=schemas.HostelAdmissionOut)
-async def create_hostel_admission(adm: schemas.HostelAdmissionCreate, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "HOSTEL_WARDEN"])), db: AsyncSession = Depends(get_db)):
+async def create_hostel_admission(adm: schemas.HostelAdmissionCreate, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "HOSTEL_WARDEN", "STUDENT"])), db: AsyncSession = Depends(get_db)):
+    if current_user.system_role == "STUDENT" and adm.student_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Students can only register themselves")
+        
+    # Check if already admitted
+    res_exist = await db.execute(select(models.HostelAdmission).where(models.HostelAdmission.student_id == adm.student_id))
+    if res_exist.scalars().first():
+        raise HTTPException(status_code=400, detail="Student is already admitted to the hostel")
+        
     db_adm = models.HostelAdmission(**adm.dict())
     db.add(db_adm)
+    
+    # Automatically generate hostel fee invoice
+    fee = models.FeeInvoice(
+        student_id=adm.student_id,
+        amount=50000.0,
+        description=f"Hostel Fees - Room {adm.room_number} ({adm.block_name})",
+        status="PENDING"
+    )
+    db.add(fee)
+    
     await db.commit()
     await db.refresh(db_adm)
     return db_adm
@@ -1223,6 +1260,70 @@ async def get_my_hostel_admission(current_user: models.User = Depends(require_ro
     if not adm:
         raise HTTPException(status_code=404, detail="Hostel admission not found for this student")
     return adm
+
+# --- OFF CAMPUS PLACEMENTS ---
+@app.post("/placements/off-campus", response_model=schemas.OffCampusPlacementOut)
+async def create_off_campus_placement(op: schemas.OffCampusPlacementCreate, current_user: models.User = Depends(require_role(["STUDENT"])), db: AsyncSession = Depends(get_db)):
+    # Check if student already submitted
+    res_exist = await db.execute(select(models.OffCampusPlacement).where(models.OffCampusPlacement.student_id == current_user.id))
+    if res_exist.scalars().first():
+        raise HTTPException(status_code=400, detail="You have already submitted an off-campus placement application")
+        
+    db_op = models.OffCampusPlacement(
+        student_id=current_user.id,
+        company_name=op.company_name,
+        job_profile=op.job_profile,
+        probation_months=op.probation_months,
+        after_confirmation_salary=op.after_confirmation_salary,
+        probation_salary=op.probation_salary,
+        bond_months=op.bond_months,
+        joining_date=op.joining_date,
+        status="PENDING"
+    )
+    db.add(db_op)
+    await db.commit()
+    await db.refresh(db_op)
+    
+    res = await db.execute(
+        select(models.OffCampusPlacement)
+        .where(models.OffCampusPlacement.id == db_op.id)
+        .options(selectinload(models.OffCampusPlacement.student))
+    )
+    return res.scalars().first()
+
+@app.get("/placements/off-campus", response_model=list[schemas.OffCampusPlacementOut])
+async def list_off_campus_placements(current_user: models.User = Depends(require_role(["PLACEMENT_OFFICER", "SUPER_ADMIN", "ADMIN"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(models.OffCampusPlacement)
+        .options(selectinload(models.OffCampusPlacement.student))
+    )
+    return res.scalars().all()
+
+@app.get("/placements/off-campus/me", response_model=schemas.OffCampusPlacementOut)
+async def get_my_off_campus_placement(current_user: models.User = Depends(require_role(["STUDENT"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(models.OffCampusPlacement)
+        .where(models.OffCampusPlacement.student_id == current_user.id)
+        .options(selectinload(models.OffCampusPlacement.student))
+    )
+    op = res.scalars().first()
+    if not op:
+        raise HTTPException(status_code=404, detail="No off-campus placement application found")
+    return op
+
+@app.put("/placements/off-campus/{id}/status")
+async def update_off_campus_status(id: str, status: str, current_user: models.User = Depends(require_role(["PLACEMENT_OFFICER", "SUPER_ADMIN", "ADMIN"])), db: AsyncSession = Depends(get_db)):
+    if status not in ["APPROVED", "REJECTED", "PENDING"]:
+        raise HTTPException(status_code=400, detail="Invalid status")
+        
+    res = await db.execute(select(models.OffCampusPlacement).where(models.OffCampusPlacement.id == id))
+    op = res.scalars().first()
+    if not op:
+        raise HTTPException(status_code=404, detail="Off-campus placement record not found")
+        
+    op.status = status
+    await db.commit()
+    return {"status": "updated", "id": id, "new_status": status}
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

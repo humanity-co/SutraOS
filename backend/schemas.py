@@ -378,3 +378,30 @@ class HostelAdmissionOut(BaseModel):
     
     class Config:
         from_attributes = True
+
+
+# --- OFF CAMPUS PLACEMENT SCHEMAS ---
+class OffCampusPlacementCreate(BaseModel):
+    company_name: str
+    job_profile: str
+    probation_months: Optional[int] = None
+    after_confirmation_salary: str
+    probation_salary: Optional[str] = None
+    bond_months: Optional[int] = None
+    joining_date: str
+
+class OffCampusPlacementOut(BaseModel):
+    id: str
+    student_id: str
+    company_name: str
+    job_profile: str
+    probation_months: Optional[int]
+    after_confirmation_salary: str
+    probation_salary: Optional[str]
+    bond_months: Optional[int]
+    joining_date: str
+    status: str
+    student: Optional[UserOut] = None
+
+    class Config:
+        from_attributes = True

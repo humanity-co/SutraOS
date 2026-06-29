@@ -45,6 +45,7 @@ export default function Layout({ children, setAuthToken }: LayoutProps) {
     { name: 'Workspace', path: '/', roles: ['ALL'] },
     { name: 'Directory', path: '/directory', roles: ['SUPER_ADMIN', 'INSTITUTION_ADMIN', 'PRINCIPAL', 'REGISTRAR', 'HOD', 'FACULTY'] },
     { name: 'Academics', path: '/academics', roles: ['SUPER_ADMIN', 'PRINCIPAL', 'HOD', 'FACULTY', 'STUDENT', 'EXAM_CONTROLLER'] },
+    { name: 'Facilities', path: '/facilities', roles: ['ALL'] },
     { name: 'Finance & HR', path: '/finance-hr', roles: ['SUPER_ADMIN', 'PRINCIPAL', 'ACCOUNTS', 'FACULTY', 'STUDENT', 'HOD', 'REGISTRAR'] },
     { name: 'Placements & Campus', path: '/placements-campus', roles: ['SUPER_ADMIN', 'PRINCIPAL', 'PLACEMENT_OFFICER', 'HOD', 'STUDENT'] }
   ];

@@ -325,3 +325,20 @@ class HostelAdmission(Base):
     
     student = relationship("User", foreign_keys=[student_id])
 
+
+# --- OFF CAMPUS PLACEMENT MODULE ---
+class OffCampusPlacement(Base):
+    __tablename__ = "off_campus_placements"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    student_id = Column(String, ForeignKey("users.id"), nullable=False)
+    company_name = Column(String, nullable=False)
+    job_profile = Column(String, nullable=False)
+    probation_months = Column(Integer, nullable=True)
+    after_confirmation_salary = Column(String, nullable=False)
+    probation_salary = Column(String, nullable=True)
+    bond_months = Column(Integer, nullable=True)
+    joining_date = Column(String, nullable=False)
+    status = Column(String, default="PENDING") # PENDING, APPROVED, REJECTED
+    
+    student = relationship("User", foreign_keys=[student_id])
+

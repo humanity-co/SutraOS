@@ -3,7 +3,7 @@ import bcrypt
 import random
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from models import Base, User, Department, StudentProfile, FacultyProfile, Course, ExamRecord, ScholarshipLedger, PlacementDrive, FeeInvoice, LeaveRequest, Classroom, CourseOffering, TimetableSlot, LibraryBook, LibraryCheckout, BusRoute, TransportReservation, HostelAdmission
+from models import Base, User, Department, StudentProfile, FacultyProfile, Course, ExamRecord, ScholarshipLedger, PlacementDrive, FeeInvoice, LeaveRequest, Classroom, CourseOffering, TimetableSlot, LibraryBook, LibraryCheckout, BusRoute, TransportReservation, HostelAdmission, OffCampusPlacement
 from passlib.context import CryptContext
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")

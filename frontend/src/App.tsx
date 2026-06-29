@@ -6,6 +6,7 @@ import Directory from './Directory';
 import FinanceHR from './FinanceHR';
 import Academics from './Academics';
 import PlacementsCampus from './PlacementsCampus';
+import Facilities from './Facilities';
 
 import Layout from './Layout';
 
@@ -29,6 +30,9 @@ function App() {
         } />
         <Route path="/academics" element={
           token ? <Layout setAuthToken={setToken}><Academics setAuthToken={setToken} /></Layout> : <Navigate to="/login" replace />
+        } />
+        <Route path="/facilities" element={
+          token ? <Layout setAuthToken={setToken}><Facilities setAuthToken={setToken} /></Layout> : <Navigate to="/login" replace />
         } />
         <Route path="/placements-campus" element={
           token ? <Layout setAuthToken={setToken}><PlacementsCampus setAuthToken={setToken} /></Layout> : <Navigate to="/login" replace />
