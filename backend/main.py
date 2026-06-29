@@ -935,7 +935,7 @@ async def publish_exams(course_id: Optional[str] = None, exam_type: Optional[str
     records = res.scalars().all()
     
     # Cryptographic freeze protocol using asymmetric signing
-    salt = "SUTRA_OS_SECURE_SALT_99"
+    salt = os.environ.get("EXAM_HASH_SALT", "SUTRA_OS_SECURE_SALT_99")
     for r in records:
         r.is_published = True
         hash_string = f"{r.id}:{r.student_id}:{r.marks_obtained}:{salt}"
