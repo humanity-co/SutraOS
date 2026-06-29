@@ -133,7 +133,7 @@ export default function PlacementsCampus({ setAuthToken }: { setAuthToken: (t: s
               activeSubTab === 'campus' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'
             }`}
           >
-            🏢 Campus Drives
+            Campus Drives
           </button>
           <button
             onClick={() => setActiveSubTab('off-campus')}
@@ -141,7 +141,7 @@ export default function PlacementsCampus({ setAuthToken }: { setAuthToken: (t: s
               activeSubTab === 'off-campus' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'
             }`}
           >
-            🌍 Off-Campus Reporting
+            Off-Campus Reporting
           </button>
         </div>
 
@@ -208,7 +208,7 @@ export default function PlacementsCampus({ setAuthToken }: { setAuthToken: (t: s
                     ) : (
                        <button 
                          onClick={() => {
-                           alert(`🏢 MULTI-ROUND PLACEMENT TRACKER\n\nDrive: ${drive.company_name}\n\n- Round 1 (Aptitude): 120 Applied | 45 Cleared\n- Round 2 (Technical): Scheduled for ${new Date(drive.drive_date).toLocaleDateString()}\n- HR Round: Pending\n\nClick OK to open the detailed Tracker Dashboard.`);
+                           alert(`MULTI-ROUND PLACEMENT TRACKER\n\nDrive: ${drive.company_name}\n\n- Round 1 (Aptitude): 120 Applied | 45 Cleared\n- Round 2 (Technical): Scheduled for ${new Date(drive.drive_date).toLocaleDateString()}\n- HR Round: Pending\n\nClick OK to open the detailed Tracker Dashboard.`);
                          }}
                          className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2 px-4 rounded-xl transition-all flex items-center"
                        >

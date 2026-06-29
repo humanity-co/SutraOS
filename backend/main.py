@@ -1151,6 +1151,38 @@ async def list_my_checkouts(current_user: models.User = Depends(require_role(["S
 
 
 # --- TRANSPORT ROUTING ---
+@app.post("/transport/stops", response_model=schemas.BusStopOut)
+async def create_bus_stop(stop: schemas.BusStopCreate, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "TRANSPORT_OFFICER"])), db: AsyncSession = Depends(get_db)):
+    res_exist = await db.execute(select(models.BusStop).where(models.BusStop.name == stop.name))
+    db_stop = res_exist.scalars().first()
+    if not db_stop:
+        db_stop = models.BusStop(name=stop.name)
+        db.add(db_stop)
+        await db.commit()
+        await db.refresh(db_stop)
+    return db_stop
+
+@app.get("/transport/stops", response_model=list[schemas.BusStopOut])
+async def list_bus_stops(current_user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(models.BusStop))
+    return res.scalars().all()
+
+@app.post("/transport/routes/{route_id}/stops/{stop_id}")
+async def link_route_stop(route_id: str, stop_id: str, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "TRANSPORT_OFFICER"])), db: AsyncSession = Depends(get_db)):
+    res_route = await db.execute(select(models.BusRoute).where(models.BusRoute.id == route_id).options(selectinload(models.BusRoute.stops)))
+    route = res_route.scalars().first()
+    if not route:
+        raise HTTPException(status_code=404, detail="Bus route not found")
+    res_stop = await db.execute(select(models.BusStop).where(models.BusStop.id == stop_id))
+    stop = res_stop.scalars().first()
+    if not stop:
+        raise HTTPException(status_code=404, detail="Bus stop not found")
+        
+    if stop not in route.stops:
+        route.stops.append(stop)
+        await db.commit()
+    return {"message": f"Stop {stop.name} successfully linked to route {route.route_name}"}
+
 @app.post("/transport/routes", response_model=schemas.BusRouteOut)
 async def create_bus_route(route: schemas.BusRouteCreate, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "TRANSPORT_OFFICER"])), db: AsyncSession = Depends(get_db)):
     db_route = models.BusRoute(**route.dict())
@@ -1161,47 +1193,50 @@ async def create_bus_route(route: schemas.BusRouteCreate, current_user: models.U
 
 @app.get("/transport/routes", response_model=list[schemas.BusRouteOut])
 async def list_bus_routes(current_user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    res = await db.execute(select(models.BusRoute))
+    res = await db.execute(select(models.BusRoute).options(selectinload(models.BusRoute.stops)))
     return res.scalars().all()
 
 @app.post("/transport/reserve", response_model=schemas.TransportReservationOut)
 async def reserve_seat(reserve: schemas.TransportReservationCreate, current_user: models.User = Depends(require_role(["STUDENT"])), db: AsyncSession = Depends(get_db)):
-    res_route = await db.execute(select(models.BusRoute).where(models.BusRoute.id == reserve.route_id))
-    route = res_route.scalars().first()
-    if not route:
-        raise HTTPException(status_code=404, detail="Bus route not found")
+    res_p_route = await db.execute(select(models.BusRoute).where(models.BusRoute.id == reserve.pickup_route_id))
+    p_route = res_p_route.scalars().first()
+    if not p_route:
+        raise HTTPException(status_code=404, detail="Pickup bus route not found")
         
-    # Check if already reserved
+    res_d_route = await db.execute(select(models.BusRoute).where(models.BusRoute.id == reserve.destination_route_id))
+    d_route = res_d_route.scalars().first()
+    if not d_route:
+        raise HTTPException(status_code=404, detail="Destination bus route not found")
+        
     res_exist = await db.execute(
         select(models.TransportReservation).where(
             models.TransportReservation.student_id == current_user.id,
-            models.TransportReservation.route_id == reserve.route_id
+            models.TransportReservation.approval_status.in_(["PENDING", "APPROVED"])
         )
     )
     if res_exist.scalars().first():
-        raise HTTPException(status_code=400, detail="You have already reserved a seat on this route")
+        raise HTTPException(status_code=400, detail="You already have an active or pending transport reservation")
 
-    if route.reserved_seats >= route.capacity:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Transport Block: Route [{route.route_name}] has reached its maximum passenger capacity ({route.capacity})."
-        )
-        
-    route.reserved_seats += 1
-    
     db_reserve = models.TransportReservation(
         student_id=current_user.id,
-        route_id=reserve.route_id,
-        seat_number=route.reserved_seats,
+        pickup_stop=reserve.pickup_stop,
+        pickup_route_id=reserve.pickup_route_id,
+        destination_stop=reserve.destination_stop,
+        destination_route_id=reserve.destination_route_id,
+        vehicle_no=p_route.bus_number,
+        paid_amount=0.0,
+        is_paid=False,
+        fee_amount=12000.0,
+        approval_authority="Transport Officer",
+        approval_status="PENDING",
         reserved_at=datetime.utcnow().isoformat() + "Z"
     )
     db.add(db_reserve)
     
-    # Automatically generate transport fee invoice (connected finance)
     fee = models.FeeInvoice(
         student_id=current_user.id,
         amount=12000.0,
-        description=f"Transport Fees - Route: {route.route_name} ({route.bus_number})",
+        description=f"Transport Fees - Route: {p_route.route_name} (Pickup: {reserve.pickup_stop})",
         status="PENDING"
     )
     db.add(fee)
@@ -1212,7 +1247,11 @@ async def reserve_seat(reserve: schemas.TransportReservationCreate, current_user
     res = await db.execute(
         select(models.TransportReservation)
         .where(models.TransportReservation.id == db_reserve.id)
-        .options(selectinload(models.TransportReservation.route))
+        .options(
+            selectinload(models.TransportReservation.pickup_route),
+            selectinload(models.TransportReservation.destination_route),
+            selectinload(models.TransportReservation.student)
+        )
     )
     return res.scalars().first()
 
@@ -1221,9 +1260,58 @@ async def list_my_reservations(current_user: models.User = Depends(require_role(
     res = await db.execute(
         select(models.TransportReservation)
         .where(models.TransportReservation.student_id == current_user.id)
-        .options(selectinload(models.TransportReservation.route))
+        .options(
+            selectinload(models.TransportReservation.pickup_route),
+            selectinload(models.TransportReservation.destination_route),
+            selectinload(models.TransportReservation.student)
+        )
     )
     return res.scalars().all()
+
+@app.get("/transport/reservations", response_model=list[schemas.TransportReservationOut])
+async def list_all_reservations(current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "TRANSPORT_OFFICER"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(models.TransportReservation)
+        .options(
+            selectinload(models.TransportReservation.pickup_route),
+            selectinload(models.TransportReservation.destination_route),
+            selectinload(models.TransportReservation.student)
+        )
+    )
+    return res.scalars().all()
+
+@app.put("/transport/reservations/{id}/status", response_model=schemas.TransportReservationOut)
+async def update_reservation_status(id: str, status: str, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "TRANSPORT_OFFICER"])), db: AsyncSession = Depends(get_db)):
+    res_reserve = await db.execute(
+        select(models.TransportReservation)
+        .where(models.TransportReservation.id == id)
+        .options(
+            selectinload(models.TransportReservation.pickup_route),
+            selectinload(models.TransportReservation.destination_route),
+            selectinload(models.TransportReservation.student)
+        )
+    )
+    reservation = res_reserve.scalars().first()
+    if not reservation:
+        raise HTTPException(status_code=404, detail="Reservation not found")
+        
+    old_status = reservation.approval_status
+    if status == "APPROVED" and old_status != "APPROVED":
+        route = reservation.pickup_route
+        if route.reserved_seats >= route.capacity:
+            raise HTTPException(status_code=400, detail=f"Route {route.route_name} is already at full capacity.")
+        route.reserved_seats += 1
+        reservation.seat_number = route.reserved_seats
+        
+    elif status != "APPROVED" and old_status == "APPROVED":
+        route = reservation.pickup_route
+        route.reserved_seats = max(0, route.reserved_seats - 1)
+        reservation.seat_number = None
+        
+    reservation.approval_status = status
+    await db.commit()
+    await db.refresh(reservation)
+    return reservation
 
 
 # --- HOSTEL ROUTING ---

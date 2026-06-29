@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, ForeignKey, Boolean, Float, DateTime, Date, JSON
+from sqlalchemy import Column, Integer, String, ForeignKey, Boolean, Float, DateTime, Date, JSON, Table
 from sqlalchemy.orm import relationship
 from database import Base
 import uuid
@@ -293,6 +293,20 @@ class LibraryCheckout(Base):
 
 
 # --- TRANSPORT MODULE ---
+route_stops = Table(
+    "route_stops",
+    Base.metadata,
+    Column("route_id", String, ForeignKey("bus_routes.id", ondelete="CASCADE"), primary_key=True),
+    Column("stop_id", String, ForeignKey("bus_stops.id", ondelete="CASCADE"), primary_key=True)
+)
+
+class BusStop(Base):
+    __tablename__ = "bus_stops"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    name = Column(String, unique=True, index=True, nullable=False)
+    
+    routes = relationship("BusRoute", secondary=route_stops, back_populates="stops", lazy="selectin")
+
 class BusRoute(Base):
     __tablename__ = "bus_routes"
     id = Column(String, primary_key=True, index=True, default=generate_uuid)
@@ -301,17 +315,29 @@ class BusRoute(Base):
     driver_name = Column(String, nullable=False)
     capacity = Column(Integer, default=30)
     reserved_seats = Column(Integer, default=0)
+    
+    stops = relationship("BusStop", secondary=route_stops, back_populates="routes", lazy="selectin")
 
 class TransportReservation(Base):
     __tablename__ = "transport_reservations"
     id = Column(String, primary_key=True, index=True, default=generate_uuid)
     student_id = Column(String, ForeignKey("users.id"), nullable=False)
-    route_id = Column(String, ForeignKey("bus_routes.id"), nullable=False)
-    seat_number = Column(Integer, nullable=False)
+    pickup_stop = Column(String, nullable=False)
+    pickup_route_id = Column(String, ForeignKey("bus_routes.id"), nullable=False)
+    destination_stop = Column(String, nullable=False)
+    destination_route_id = Column(String, ForeignKey("bus_routes.id"), nullable=False)
+    vehicle_no = Column(String, nullable=True)
+    paid_amount = Column(Float, default=0.0)
+    is_paid = Column(Boolean, default=False)
+    fee_amount = Column(Float, default=12000.0)
+    approval_authority = Column(String, default="Transport Officer")
+    approval_status = Column(String, default="PENDING")
+    seat_number = Column(Integer, nullable=True)
     reserved_at = Column(String, nullable=False)
     
     student = relationship("User", foreign_keys=[student_id])
-    route = relationship("BusRoute")
+    pickup_route = relationship("BusRoute", foreign_keys=[pickup_route_id])
+    destination_route = relationship("BusRoute", foreign_keys=[destination_route_id])
 
 
 # --- HOSTEL MODULE ---

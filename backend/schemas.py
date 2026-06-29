@@ -330,6 +330,16 @@ class LibraryCheckoutOut(BaseModel):
 
 
 # --- TRANSPORT SCHEMAS ---
+class BusStopCreate(BaseModel):
+    name: str
+
+class BusStopOut(BaseModel):
+    id: str
+    name: str
+    
+    class Config:
+        from_attributes = True
+
 class BusRouteCreate(BaseModel):
     route_name: str
     bus_number: str
@@ -343,20 +353,35 @@ class BusRouteOut(BaseModel):
     driver_name: str
     capacity: int
     reserved_seats: int
+    stops: Optional[list[BusStopOut]] = []
     
     class Config:
         from_attributes = True
 
 class TransportReservationCreate(BaseModel):
-    route_id: str
+    pickup_stop: str
+    pickup_route_id: str
+    destination_stop: str
+    destination_route_id: str
 
 class TransportReservationOut(BaseModel):
     id: str
     student_id: str
-    route_id: str
-    seat_number: int
+    pickup_stop: str
+    pickup_route_id: str
+    destination_stop: str
+    destination_route_id: str
+    vehicle_no: Optional[str] = None
+    paid_amount: float
+    is_paid: bool
+    fee_amount: float
+    approval_authority: str
+    approval_status: str
+    seat_number: Optional[int] = None
     reserved_at: str
-    route: Optional[BusRouteOut] = None
+    pickup_route: Optional[BusRouteOut] = None
+    destination_route: Optional[BusRouteOut] = None
+    student: Optional[UserOut] = None
     
     class Config:
         from_attributes = True

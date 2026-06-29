@@ -3,7 +3,7 @@ import bcrypt
 import random
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from models import Base, User, Department, StudentProfile, FacultyProfile, Course, ExamRecord, ScholarshipLedger, PlacementDrive, FeeInvoice, LeaveRequest, Classroom, CourseOffering, TimetableSlot, LibraryBook, LibraryCheckout, BusRoute, TransportReservation, HostelAdmission, OffCampusPlacement
+from models import Base, User, Department, StudentProfile, FacultyProfile, Course, ExamRecord, ScholarshipLedger, PlacementDrive, FeeInvoice, LeaveRequest, Classroom, CourseOffering, TimetableSlot, LibraryBook, LibraryCheckout, BusRoute, TransportReservation, HostelAdmission, OffCampusPlacement, BusStop
 from passlib.context import CryptContext
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -295,12 +295,45 @@ async def seed_data():
         ]
         session.add_all(books)
 
-        # Seed Bus Routes
-        routes = [
-            BusRoute(route_name="Aurangabad City Route 1", bus_number="MH-20-EF-1234", driver_name="Satish Singh", capacity=3, reserved_seats=0),
-            BusRoute(route_name="Chhatrapati Sambhajinagar Route 2", bus_number="MH-20-GH-5678", driver_name="Ramesh Patil", capacity=25, reserved_seats=0)
+        # Seed Bus Stops
+        stops_list = [
+            "Aamkhas Maidan", "Akashvani Signal", "Ambedkar Chawk", "API CORNER", 
+            "AS Club Signal", "Avishkar Colony", "Baba Petrol Pump", "Bajrang Chawk", 
+            "Baliram Patil School", "Cambridge School", "Chetak Ghoda", "Chikalthana", 
+            "CHIKALTHANA GAON", "Chishtiya polic station", "Cidco Bus Stop Chouk", 
+            "CIDCO Garden", "CIDCO Mahanagar Stop", "Collector Office Signal", 
+            "Darga Chawk", "Darga Chouk", "Dashnimukkhi Hanuman Mandir", 
+            "Dhoodh Dairy Signal", "Dhoot Hospital", "Gajanan Mandir", 
+            "Gajanan Mandir Reliance Mall", "Ganpati Mandir", "Hadko Corner", 
+            "Hanuman Nagar", "Harsulgaon", "Himayat Bag", "Hindusthan Awas", 
+            "Hira Hotel Chouk(Amrut Hospital)", "Holycross School", "Mill Corner", 
+            "MIT", "MIT College", "MIT Poly Building", "Mohta Devi", "Mondha Naka", 
+            "More Chawk", "Mukund Wadi", "Mukutwadi", "Nagar Naka", 
+            "Nawkhanda College Bhadkal Gate", "Oasis Chawk", 
+            "Old Paithan Linke Road Bajaj Gate", "Paithan road T point", 
+            "Prozone Mall N-1", "Pudliknagar", "Pundlik Nagar", "Railway Station", 
+            "Ram Nagar/Chikhalthana", "RamNagar", "Ranjangaon Stop", "Roplekar Hospital", 
+            "Sawarkar Chauk TV Center", "SBI Bank Signal Cidco", "SBOA", 
+            "South City Stop", "Sudgirni Chawk", "Sudhgirni Chawk", "T point", 
+            "T.V.Center", "Vadgaon Phata", "VIT's Hotel", "Vitkheda Phata", 
+            "Vutthal Mandir Pandharpur"
         ]
-        session.add_all(routes)
+        db_stops = [BusStop(name=name) for name in stops_list]
+        session.add_all(db_stops)
+        await session.commit()
+
+        # Seed Bus Routes
+        r1 = BusRoute(route_name="Jatwada ( Sahara vaibhav) To MIT", bus_number="MH-20-EF-1010", driver_name="Satish Singh", capacity=40, reserved_seats=0)
+        r2 = BusRoute(route_name="Aurangabad Station To MIT", bus_number="MH-20-GH-2020", driver_name="Ramesh Patil", capacity=40, reserved_seats=0)
+        session.add_all([r1, r2])
+        await session.commit()
+        await session.refresh(r1)
+        await session.refresh(r2)
+
+        # Link all stops to these routes
+        r1.stops = db_stops
+        r2.stops = db_stops
+        await session.commit()
 
         # Seed Hostel Admissions
         hostel_admissions = [
