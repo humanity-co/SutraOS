@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Plus, BookOpen, Clock, AlertCircle } from 'lucide-react';
+import { Plus, BookOpen, Clock, AlertCircle, MessageSquare } from 'lucide-react';
 import api from './api';
 
-export default function Academics({ setAuthToken }: { setAuthToken: (t: string | null) => void }) {
+export default function Academics() {
   const [user, setUser] = useState<any>(null);
   const [courses, setCourses] = useState<any[]>([]);
   const [departments, setDepartments] = useState<any[]>([]);
@@ -13,6 +13,10 @@ export default function Academics({ setAuthToken }: { setAuthToken: (t: string |
   const [formData, setFormData] = useState({
     code: '', name: '', credits: 3, is_elective: false, department_id: ''
   });
+  const [broadcastForm, setBroadcastForm] = useState({
+    audience_type: 'ALL', message: '', department_code: ''
+  });
+
 
   useEffect(() => {
     const fetchData = async () => {
@@ -36,7 +40,7 @@ export default function Academics({ setAuthToken }: { setAuthToken: (t: string |
       }
     };
     fetchData();
-  }, [setAuthToken]);
+  }, []);
 
   const handleAddSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -58,6 +62,18 @@ export default function Academics({ setAuthToken }: { setAuthToken: (t: string |
       alert(`🔒 CRYPTOGRAPHIC FREEZE COMPLETE\n\nGenerated SHA-256 Hashes for ${res.data.records_published} records.\n\nOnce published, NO faculty or admin can alter the marks without triggering an audit violation.`);
     } catch (e) {
       alert("Failed to freeze exams");
+    }
+  };
+
+  const handleBroadcast = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const res = await api.post('/communication/broadcast-parents', broadcastForm);
+      alert(`Message broadcasted to ${res.data.recipient_count} parent(s) successfully!`);
+      setBroadcastForm({ audience_type: 'ALL', message: '', department_code: '' });
+    } catch (err: any) {
+      console.error(err);
+      alert(err.response?.data?.detail || "Error sending broadcast");
     }
   };
 
@@ -160,6 +176,69 @@ export default function Academics({ setAuthToken }: { setAuthToken: (t: string |
             >
               {['EXAM_CONTROLLER', 'SUPER_ADMIN'].includes(user?.system_role) ? 'Freeze & Publish Exams' : 'View My Grades'}
             </button>
+          </div>
+        )}
+        
+        {/* Parent Communication Broadcast Widget */}
+        {['ADMIN', 'SUPER_ADMIN', 'PRINCIPAL', 'HOD', 'FACULTY'].includes(user?.system_role) && (
+          <div className="bg-emerald-50 rounded-3xl p-6 shadow-sm border border-emerald-100/50">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-white rounded-xl flex items-center justify-center text-emerald-500 shadow-sm">
+                <MessageSquare size={20} />
+              </div>
+              <h3 className="text-lg font-bold text-emerald-900 tracking-tight">Parent Comm. Center</h3>
+            </div>
+            
+            <form onSubmit={handleBroadcast} className="space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-emerald-800 mb-1">Target Audience</label>
+                <select 
+                  className="w-full border border-emerald-200 bg-white rounded-xl p-2 text-sm font-semibold text-emerald-800 focus:outline-none focus:border-emerald-500 shadow-sm"
+                  value={broadcastForm.audience_type}
+                  onChange={e => setBroadcastForm({...broadcastForm, audience_type: e.target.value})}
+                >
+                  <option value="ALL">All Students</option>
+                  <option value="LOW_ATTENDANCE">Low Attendance (&lt; 75%)</option>
+                  <option value="DEPARTMENT">Specific Department</option>
+                </select>
+              </div>
+
+              {broadcastForm.audience_type === 'DEPARTMENT' && (
+                <div>
+                  <label className="block text-xs font-bold text-emerald-800 mb-1">Department Code</label>
+                  <select 
+                    required 
+                    className="w-full border border-emerald-200 bg-white rounded-xl p-2 text-sm font-semibold text-emerald-800 focus:outline-none focus:border-emerald-500 shadow-sm"
+                    value={broadcastForm.department_code}
+                    onChange={e => setBroadcastForm({...broadcastForm, department_code: e.target.value})}
+                  >
+                    <option value="">Select Department...</option>
+                    {departments.map(d => (
+                      <option key={d.id} value={d.code}>{d.name} ({d.code})</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-bold text-emerald-800 mb-1">Custom Message</label>
+                <textarea 
+                  required 
+                  rows={3}
+                  className="w-full border border-emerald-200 bg-white rounded-xl p-2.5 text-sm font-medium text-slate-700 focus:outline-none focus:border-emerald-500 shadow-sm placeholder:text-slate-400"
+                  placeholder="Type important update for parents (e.g. Results declared, Exam tomorrow...)"
+                  value={broadcastForm.message}
+                  onChange={e => setBroadcastForm({...broadcastForm, message: e.target.value})}
+                />
+              </div>
+
+              <button 
+                type="submit" 
+                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-2.5 rounded-xl transition-colors text-sm shadow-sm shadow-emerald-500/20"
+              >
+                Send Broadcast to Parents
+              </button>
+            </form>
           </div>
         )}
       </div>

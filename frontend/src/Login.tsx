@@ -2,13 +2,22 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
 import api from './api';
+import { useAuth } from './context/AuthContext';
 
-export default function Login({ setAuthToken }: { setAuthToken: (t: string | null) => void }) {
+export default function Login() {
+  const { login } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  
+  // Alumni Mode States
+  const [isAlumniMode, setIsAlumniMode] = useState(false);
+  const [alumniData, setAlumniData] = useState({ batch_year: '', department: '', contact_number: '', current_company: '' });
+  const [showOtp, setShowOtp] = useState(false);
+  const [otp, setOtp] = useState('');
+  
   const navigate = useNavigate();
 
 
@@ -32,10 +41,49 @@ export default function Login({ setAuthToken }: { setAuthToken: (t: string | nul
       
       const token = res.data.access_token;
       localStorage.setItem('token', token);
-      setAuthToken(token);
+      await login(token);
       navigate('/');
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Login failed. Please check your credentials.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleAlumniRequestOtp = (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    if (!alumniData.batch_year || !alumniData.department || !alumniData.contact_number) {
+      setError('Please fill in all details.');
+      return;
+    }
+    setLoading(true);
+    setTimeout(() => {
+      setLoading(false);
+      setShowOtp(true);
+      // For mock purposes
+      console.log("MOCK OTP SENT: 123456");
+    }, 800);
+  };
+
+  const handleAlumniVerify = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    try {
+      const res = await api.post('/alumni/onboard', {
+        batch_year: parseInt(alumniData.batch_year),
+        department: alumniData.department,
+        contact_number: alumniData.contact_number,
+        current_company: alumniData.current_company,
+        otp: otp
+      });
+      const token = res.data.access_token;
+      localStorage.setItem('token', token);
+      await login(token);
+      navigate('/');
+    } catch (err: any) {
+      setError(err.response?.data?.detail || 'Invalid OTP');
     } finally {
       setLoading(false);
     }
@@ -75,6 +123,7 @@ export default function Login({ setAuthToken }: { setAuthToken: (t: string | nul
             </div>
           )}
           
+          {!isAlumniMode ? (
           <form onSubmit={e => handleLogin(e)} className="space-y-4">
             <div>
               <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">Identifier</label>
@@ -115,6 +164,52 @@ export default function Login({ setAuthToken }: { setAuthToken: (t: string | nul
               {loading ? 'Authenticating...' : 'Sign In'}
             </button>
           </form>
+          ) : (
+            <div className="space-y-4 animate-fade-in">
+              {!showOtp ? (
+                <form onSubmit={handleAlumniRequestOtp} className="space-y-4">
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">Batch Year</label>
+                    <input type="number" required value={alumniData.batch_year} onChange={e => setAlumniData({...alumniData, batch_year: e.target.value})} className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-md text-sm font-medium" placeholder="e.g. 2023" />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">Department</label>
+                    <input type="text" required value={alumniData.department} onChange={e => setAlumniData({...alumniData, department: e.target.value})} className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-md text-sm font-medium" placeholder="Computer Science" />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">Current Company</label>
+                    <input type="text" required value={alumniData.current_company} onChange={e => setAlumniData({...alumniData, current_company: e.target.value})} className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-md text-sm font-medium" placeholder="Google" />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">Mobile Number</label>
+                    <input type="tel" required value={alumniData.contact_number} onChange={e => setAlumniData({...alumniData, contact_number: e.target.value})} className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-md text-sm font-medium" placeholder="+91 XXXXX XXXXX" />
+                  </div>
+                  <button type="submit" disabled={loading} className="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold py-2.5 rounded-md shadow-md mt-2 flex justify-center">
+                    {loading ? 'Sending OTP...' : 'Request OTP'}
+                  </button>
+                </form>
+              ) : (
+                <form onSubmit={handleAlumniVerify} className="space-y-4 animate-fade-in">
+                  <div className="bg-emerald-50 text-emerald-700 p-3 rounded-lg text-xs font-semibold mb-2">
+                    OTP sent to {alumniData.contact_number}. (Hint: Use 123456)
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold text-slate-700 uppercase tracking-wider mb-1.5">Enter 6-Digit OTP</label>
+                    <input type="text" required value={otp} onChange={e => setOtp(e.target.value)} maxLength={6} className="w-full px-3 py-2.5 bg-white border border-slate-200 rounded-md text-center tracking-[1em] font-bold text-lg" placeholder="------" />
+                  </div>
+                  <button type="submit" disabled={loading} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-semibold py-2.5 rounded-md shadow-md mt-2 flex justify-center">
+                    {loading ? 'Verifying...' : 'Verify & Enter Portal'}
+                  </button>
+                </form>
+              )}
+            </div>
+          )}
+
+          <div className="mt-6 text-center">
+            <button onClick={() => {setIsAlumniMode(!isAlumniMode); setShowOtp(false); setError('');}} className="text-xs font-bold text-slate-500 hover:text-indigo-600 transition-colors uppercase tracking-wider underline underline-offset-4">
+              {isAlumniMode ? '← Back to Staff/Student Login' : 'Alumni Registration / Login'}
+            </button>
+          </div>
         </div>
       </div>
     </div>

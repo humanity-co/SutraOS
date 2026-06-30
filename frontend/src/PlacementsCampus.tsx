@@ -3,7 +3,7 @@ import { Briefcase, Building, ChevronRight, Send, CheckCircle2, Plus, Check, X }
 import api from './api';
 import StudentDetailModal from './StudentDetailModal';
 
-export default function PlacementsCampus({ setAuthToken }: { setAuthToken: (t: string | null) => void }) {
+export default function PlacementsCampus() {
   const [user, setUser] = useState<any>(null);
   const [drives, setDrives] = useState<any[]>([]);
   const [activeSubTab, setActiveSubTab] = useState<'campus' | 'off-campus'>('campus');
@@ -54,7 +54,7 @@ export default function PlacementsCampus({ setAuthToken }: { setAuthToken: (t: s
 
   useEffect(() => {
     fetchData();
-  }, [setAuthToken]);
+  }, []);
 
   const handleApply = async (driveId: string) => {
     try {

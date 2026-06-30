@@ -57,6 +57,7 @@ class StudentCreate(BaseModel):
     current_semester: int = 1
     parent_whatsapp: Optional[str] = None
     parent_email: Optional[EmailStr] = None
+    admission_category: Optional[str] = "OPEN"
 
 class StudentProfileOut(BaseModel):
     id: str
@@ -66,6 +67,7 @@ class StudentProfileOut(BaseModel):
     parent_whatsapp: Optional[str]
     parent_email: Optional[str]
     cgpa: str
+    admission_category: str
     
     class Config:
         from_attributes = True
@@ -92,16 +94,25 @@ class FeeInvoiceCreate(BaseModel):
     student_id: str
     amount: float
     description: str
+    invoice_type: Optional[str] = "TUITION"
+    student_share: Optional[float] = None
+    govt_share: Optional[float] = None
+    due_date: Optional[datetime] = None
+    mahadbt_application_id: Optional[str] = None
 
 class FeeInvoiceOut(BaseModel):
     id: str
     student_id: str
     amount: float
+    student_share: float
+    govt_share: float
     description: str
+    invoice_type: str
     status: str
     receipt_number: Optional[str]
     paid_at: Optional[datetime] = None
-    due_date: Optional[str] = None
+    due_date: Optional[datetime] = None
+    mahadbt_application_id: Optional[str]
 
     class Config:
         from_attributes = True
@@ -317,6 +328,7 @@ class LibraryBookOut(BaseModel):
 
 class LibraryCheckoutCreate(BaseModel):
     book_id: str
+    student_username: Optional[str] = None
 
 class LibraryCheckoutOut(BaseModel):
     id: str
@@ -704,3 +716,90 @@ class StudentDirectRegister(BaseModel):
     mother_name: Optional[str] = None
     mother_contact: Optional[str] = None
     mother_address: Optional[str] = None
+
+# --- COMMUNICATION SCHEMAS ---
+class ParentBroadcastCreate(BaseModel):
+    audience_type: str # ALL, LOW_ATTENDANCE, DEPARTMENT
+    message: str
+    department_code: Optional[str] = None
+
+# --- DOUBLE-ENTRY ACCOUNTING SCHEMAS ---
+class GLAccountBase(BaseModel):
+    name: str
+    group: str
+    balance_type: str
+
+class GLAccountOut(GLAccountBase):
+    id: str
+    created_at: datetime
+    class Config:
+        from_attributes = True
+
+class VoucherEntryCreate(BaseModel):
+    account_id: str
+    cost_center_id: Optional[str] = None
+    fund_id: Optional[str] = None
+    debit: float = 0.0
+    credit: float = 0.0
+
+class VoucherCreate(BaseModel):
+    voucher_type: str
+    narration: str
+    entries: list[VoucherEntryCreate]
+
+class VoucherEntryOut(BaseModel):
+    id: str
+    account_id: str
+    debit: float
+    credit: float
+    account: Optional[GLAccountOut] = None
+    class Config:
+        from_attributes = True
+
+class VoucherOut(BaseModel):
+    id: str
+    voucher_type: str
+    voucher_number: str
+    voucher_date: datetime
+    narration: str
+    created_by: str
+    entries: list[VoucherEntryOut]
+    class Config:
+        from_attributes = True
+
+class ParentBroadcastOut(BaseModel):
+    id: str
+    sender_id: str
+    audience_type: str
+    message: str
+    sent_at: str
+    recipient_count: int
+    class Config:
+        from_attributes = True
+
+# --- PHASE 3: SCHEMAS ---
+class ServiceBookCreate(BaseModel):
+    faculty_id: str
+    basic_pay: float
+    da_allowance: float = 0.0
+    hra_allowance: float = 0.0
+    tax_declaration: Optional[dict] = None
+
+class PayrollRunRequest(BaseModel):
+    month: str # e.g., "2026-06"
+
+class GrievanceTicketCreate(BaseModel):
+    category: str
+    description: str
+    is_anonymous: bool = True
+
+class PurchaseIndentCreate(BaseModel):
+    item_name: str
+    quantity: int
+
+class AlumniOnboardRequest(BaseModel):
+    batch_year: int
+    department: str
+    contact_number: str
+    current_company: str
+    otp: str

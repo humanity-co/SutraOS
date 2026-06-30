@@ -194,6 +194,7 @@ export default function Facilities() {
   const [checkouts, setCheckouts] = useState<Checkout[]>([]);
   const [allCheckouts, setAllCheckouts] = useState<Checkout[]>([]);
   const [searchedBooks, setSearchedBooks] = useState<Book[]>([]);
+  const [checkoutUsernames, setCheckoutUsernames] = useState<{[key: string]: string}>({});
   const [searchQuery, setSearchQuery] = useState('');
   const [hasSearched, setHasSearched] = useState(false);
   const [loadingLibrary, setLoadingLibrary] = useState(false);
@@ -324,9 +325,9 @@ export default function Facilities() {
       if (isLibrarian) {
         const resAll = await api.get('/library/checkouts');
         setAllCheckouts(resAll.data);
+        const resB = await api.get('/library/books');
+        setSearchedBooks(resB.data);
       }
-      const resB = await api.get('/library/books');
-      setSearchedBooks(resB.data);
     } catch (err) {
       console.error(err);
     } finally {
@@ -531,9 +532,9 @@ export default function Facilities() {
     fetchLibraryData();
   };
 
-  const handleCheckoutBook = async (bookId: string) => {
+  const handleCheckoutBook = async (bookId: string, studentUsername?: string) => {
     try {
-      await api.post('/library/checkout', { book_id: bookId });
+      await api.post('/library/checkout', { book_id: bookId, student_username: studentUsername });
       showNotification('success', 'Book checked out successfully! Keep in mind the due date.');
       fetchLibraryData();
     } catch (err: any) {
@@ -1633,48 +1634,60 @@ export default function Facilities() {
               )}
 
               {/* Book inquiry & Catalog Search */}
-              <div className="space-y-4 pt-6 border-t border-slate-100">
-                <h4 className="text-base font-bold text-slate-800">Search Library Catalog</h4>
-                <form onSubmit={handleSearchBooks} className="flex gap-3 max-w-lg">
-                  <input
-                    type="text"
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search by title, author, or ISBN..."
-                    className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-blue-500 font-semibold"
-                  />
-                  <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-xl shadow-md text-xs">
-                    Search
-                  </button>
-                </form>
+              {isLibrarian && (
+                <div className="space-y-4 pt-6 border-t border-slate-100">
+                  <h4 className="text-base font-bold text-slate-800">Search Library Catalog</h4>
+                  <form onSubmit={handleSearchBooks} className="flex gap-3 max-w-lg">
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder="Search by title, author, or ISBN..."
+                      className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-4 py-2 text-sm focus:outline-none focus:border-blue-500 font-semibold"
+                    />
+                    <button type="submit" className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-xl shadow-md text-xs">
+                      Search
+                    </button>
+                  </form>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {searchedBooks.map((book) => (
-                    <div key={book.id} className="border border-slate-200 p-4 rounded-2xl flex justify-between items-center bg-white shadow-sm hover:shadow transition-shadow">
-                      <div>
-                        <h5 className="text-sm font-bold text-slate-850">{book.title}</h5>
-                        <p className="text-xs text-slate-500 font-semibold">Author: {book.author}</p>
-                        <span className={`inline-block mt-2 px-2 py-0.5 rounded text-[10px] font-bold ${book.available_copies > 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
-                          {book.available_copies} of {book.total_copies} copies available
-                        </span>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {searchedBooks.map((book) => (
+                      <div key={book.id} className="border border-slate-200 p-4 rounded-2xl flex justify-between items-center bg-white shadow-sm hover:shadow transition-shadow">
+                        <div className="flex-1">
+                          <h5 className="text-sm font-bold text-slate-850">{book.title}</h5>
+                          <p className="text-xs text-slate-500 font-semibold">Author: {book.author}</p>
+                          <span className={`inline-block mt-2 px-2 py-0.5 rounded text-[10px] font-bold ${book.available_copies > 0 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
+                            {book.available_copies} of {book.total_copies} copies available
+                          </span>
+                        </div>
+                        <div className="flex flex-col items-end gap-2 ml-4">
+                          <input
+                            type="text"
+                            placeholder="Student Username"
+                            value={checkoutUsernames[book.id] || ''}
+                            onChange={(e) => setCheckoutUsernames({...checkoutUsernames, [book.id]: e.target.value})}
+                            className="bg-slate-50 border border-slate-200 rounded-lg px-2 py-1 text-xs w-32 focus:outline-none focus:border-blue-500"
+                          />
+                          <button
+                            disabled={book.available_copies <= 0 || !checkoutUsernames[book.id]}
+                            onClick={() => {
+                              handleCheckoutBook(book.id, checkoutUsernames[book.id]);
+                              setCheckoutUsernames({...checkoutUsernames, [book.id]: ''});
+                            }}
+                            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all w-full ${
+                              book.available_copies > 0 && checkoutUsernames[book.id]
+                                ? 'bg-blue-600 hover:bg-blue-700 text-white shadow'
+                                : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                            }`}
+                          >
+                            Checkout to Student
+                          </button>
+                        </div>
                       </div>
-                      {isStudent && (
-                        <button
-                          disabled={book.available_copies <= 0}
-                          onClick={() => handleCheckoutBook(book.id)}
-                          className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                            book.available_copies > 0
-                              ? 'bg-blue-600 hover:bg-blue-700 text-white shadow'
-                              : 'bg-slate-100 text-slate-400 cursor-not-allowed'
-                          }`}
-                        >
-                          Checkout Book
-                        </button>
-                      )}
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           )}
 

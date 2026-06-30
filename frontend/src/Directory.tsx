@@ -3,13 +3,21 @@ import { Search, Mail, Phone, MapPin } from 'lucide-react';
 import api from './api';
 import StudentDetailModal from './StudentDetailModal';
 
-export default function Directory({ setAuthToken }: { setAuthToken: (t: string | null) => void }) {
+export default function Directory() {
   const [users, setUsers] = useState<any[]>([]);
   const [departments, setDepartments] = useState<any[]>([]);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [filterRole, setFilterRole] = useState('ALL');
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedSearchQuery(searchQuery);
+    }, 250);
+    return () => clearTimeout(handler);
+  }, [searchQuery]);
   
   // Notification Toast state
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
@@ -36,7 +44,7 @@ export default function Directory({ setAuthToken }: { setAuthToken: (t: string |
 
   useEffect(() => {
     fetchData();
-  }, [setAuthToken]);
+  }, []);
 
   const handleAddRole = async (userId: string, newRole: string) => {
     const targetUser = users.find(u => u.id === userId);
@@ -74,8 +82,8 @@ export default function Directory({ setAuthToken }: { setAuthToken: (t: string |
   };
 
   const filteredUsers = users.filter(u => {
-    const matchesSearch = (u.first_name + ' ' + u.last_name).toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          u.email.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesSearch = (u.first_name + ' ' + u.last_name).toLowerCase().includes(debouncedSearchQuery.toLowerCase()) || 
+                          u.email.toLowerCase().includes(debouncedSearchQuery.toLowerCase());
     const matchesRole = filterRole === 'ALL' || u.system_role === filterRole;
     
     // Strict department restriction for HOD and Faculty roles

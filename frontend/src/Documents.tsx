@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { UploadCloud, FileText, ShieldCheck, Trash2, Calendar } from 'lucide-react';
+import { UploadCloud, FileText, ShieldCheck, Trash2, Calendar, Eye } from 'lucide-react';
 import api from './api';
 
 interface DocumentLocker {
@@ -20,6 +20,7 @@ export default function Documents() {
   const [selectedCategory, setSelectedCategory] = useState('MARKSHEET');
 
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const showNotification = (type: 'success' | 'error', message: string) => {
     setNotification({ type, message });
@@ -101,6 +102,7 @@ export default function Documents() {
   };
 
   return (
+    <>
     <div className="space-y-6 animate-fade-in">
       
       {/* Toast Notification */}
@@ -252,6 +254,13 @@ export default function Documents() {
                           <ShieldCheck size={14} />
                         </button>
                         <button
+                          onClick={() => setPreviewUrl(`http://localhost:8000/dms/download/${doc.id}`)}
+                          className="bg-blue-50 hover:bg-blue-100 text-blue-600 p-2 rounded-xl transition-colors inline-flex items-center justify-center border border-blue-100"
+                          title="Preview Document"
+                        >
+                          <Eye size={14} />
+                        </button>
+                        <button
                           onClick={() => handleDelete(doc.id)}
                           className="bg-rose-50 hover:bg-rose-100 text-rose-600 p-2 rounded-xl transition-colors inline-flex items-center justify-center border border-rose-100"
                           title="Delete Permanently"
@@ -270,5 +279,40 @@ export default function Documents() {
       </div>
 
     </div>
+
+      {/* DOCUMENT PREVIEW MODAL */}
+      {previewUrl && (
+        <div className="fixed inset-0 z-[100] bg-slate-900/90 backdrop-blur-sm flex flex-col items-center justify-center p-4 sm:p-8 animate-in fade-in duration-200">
+          <div className="w-full max-w-6xl h-full bg-white rounded-3xl overflow-hidden flex flex-col shadow-2xl border border-white/20">
+            <div className="flex justify-between items-center p-4 border-b border-slate-100 bg-slate-50">
+              <h3 className="font-bold text-slate-800">Secure Document Preview</h3>
+              <div className="flex gap-2">
+                <a 
+                  href={previewUrl}
+                  download
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-sm transition-colors"
+                >
+                  Download File
+                </a>
+                <button 
+                  onClick={() => setPreviewUrl(null)}
+                  className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2 rounded-xl text-sm font-bold shadow-sm transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 w-full bg-slate-100/50 p-4">
+              <iframe 
+                src={previewUrl} 
+                className="w-full h-full rounded-2xl border border-slate-200 bg-white"
+                title="Document Preview"
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+    </>
   );
 }

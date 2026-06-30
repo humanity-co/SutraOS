@@ -2,6 +2,7 @@ from sqlalchemy import Column, Integer, String, ForeignKey, Boolean, Float, Date
 from sqlalchemy.orm import relationship
 from database import Base
 import uuid
+from datetime import datetime
 
 def generate_uuid():
     return str(uuid.uuid4())
@@ -51,6 +52,7 @@ class StudentProfile(Base):
     parent_whatsapp = Column(String, nullable=True)
     parent_email = Column(String, nullable=True)
     cgpa = Column(String, default="0.0")
+    admission_category = Column(String, default="OPEN") # OPEN, OBC, SC, ST, SEBC, EWS, TFWS
 
     user = relationship("User", back_populates="student_profile")
 
@@ -70,9 +72,14 @@ class FeeInvoice(Base):
     id = Column(String, primary_key=True, index=True, default=generate_uuid)
     student_id = Column(String, ForeignKey("users.id"), nullable=False)
     amount = Column(Float, nullable=False)
+    student_share = Column(Float, default=0.0)
+    govt_share = Column(Float, default=0.0)
     description = Column(String, nullable=False)
+    invoice_type = Column(String, default="TUITION") # TUITION, HOSTEL, TRANSPORT, EXAM
+    mahadbt_application_id = Column(String, nullable=True)
     status = Column(String, default="PENDING") # PENDING, PAID
     receipt_number = Column(String, nullable=True)
+    due_date = Column(DateTime, nullable=True)
     paid_at = Column(DateTime, nullable=True)
     
     student = relationship("User", foreign_keys=[student_id])
@@ -547,3 +554,150 @@ class AdmissionApplication(Base):
     status = Column(String, default="PENDING") # PENDING, MERIT_LISTED, ADMITTED
     applied_at = Column(String, nullable=False)
 
+# --- COMMUNICATION BROADCASTS ---
+class ParentBroadcast(Base):
+    __tablename__ = "parent_broadcasts"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    sender_id = Column(String, ForeignKey("users.id"), nullable=False)
+    audience_type = Column(String, nullable=False)
+    message = Column(String, nullable=False)
+    sent_at = Column(String, nullable=False)
+    recipient_count = Column(Integer, nullable=False)
+
+    sender = relationship("User")
+
+# --- DOUBLE-ENTRY ACCOUNTING ENGINE ---
+
+class GLAccount(Base):
+    __tablename__ = "gl_accounts"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    name = Column(String, nullable=False, unique=True)
+    group = Column(String, nullable=False) # ASSET, LIABILITY, INCOME, EXPENSE
+    balance_type = Column(String, nullable=False) # DEBIT, CREDIT
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+class CostCenter(Base):
+    __tablename__ = "cost_centers"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    name = Column(String, nullable=False, unique=True)
+    department_id = Column(String, ForeignKey("departments.id"), nullable=True)
+
+class Fund(Base):
+    __tablename__ = "funds"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    name = Column(String, nullable=False, unique=True)
+    is_restricted = Column(Boolean, default=False)
+
+class Voucher(Base):
+    __tablename__ = "vouchers"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    voucher_type = Column(String, nullable=False) # RECEIPT, PAYMENT, JOURNAL, CONTRA
+    voucher_number = Column(String, nullable=False, unique=True)
+    voucher_date = Column(DateTime, default=datetime.utcnow)
+    narration = Column(String, nullable=False)
+    created_by = Column(String, ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    entries = relationship("VoucherEntry", back_populates="voucher", cascade="all, delete-orphan")
+
+class VoucherEntry(Base):
+    __tablename__ = "voucher_entries"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    voucher_id = Column(String, ForeignKey("vouchers.id"), nullable=False)
+    account_id = Column(String, ForeignKey("gl_accounts.id"), nullable=False)
+    cost_center_id = Column(String, ForeignKey("cost_centers.id"), nullable=True)
+    fund_id = Column(String, ForeignKey("funds.id"), nullable=True)
+    debit = Column(Float, default=0.0)
+    credit = Column(Float, default=0.0)
+    
+    voucher = relationship("Voucher", back_populates="entries")
+    account = relationship("GLAccount")
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    voucher_id = Column(String, nullable=False)
+    action = Column(String, nullable=False) # CREATE, UPDATE, DELETE
+    timestamp = Column(DateTime, default=datetime.utcnow)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    old_data = Column(JSON, nullable=True)
+    new_data = Column(JSON, nullable=True)
+
+# --- PHASE 3: HR & PAYROLL ENGINE ---
+class ServiceBook(Base):
+    __tablename__ = "service_books"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    faculty_id = Column(String, ForeignKey("users.id"), unique=True, nullable=False)
+    basic_pay = Column(Float, nullable=False)
+    da_allowance = Column(Float, default=0.0)
+    hra_allowance = Column(Float, default=0.0)
+    tax_declaration = Column(JSON, nullable=True) # 80C, 80D limits
+
+class AttendanceMuster(Base):
+    __tablename__ = "attendance_musters"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    faculty_id = Column(String, ForeignKey("users.id"), nullable=False)
+    month = Column(String, nullable=False) # e.g., "2026-06"
+    unpaid_leaves = Column(Integer, default=0)
+
+class PayrollRecord(Base):
+    __tablename__ = "payroll_records"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    faculty_id = Column(String, ForeignKey("users.id"), nullable=False)
+    month = Column(String, nullable=False)
+    gross_pay = Column(Float, nullable=False)
+    tds_deducted = Column(Float, default=0.0)
+    pf_deducted = Column(Float, default=0.0)
+    net_pay = Column(Float, nullable=False)
+    voucher_id = Column(String, ForeignKey("vouchers.id"), nullable=True)
+
+# --- PHASE 3: ACCREDITATION & GRIEVANCE ---
+class FacultyPublication(Base):
+    __tablename__ = "faculty_publications"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    faculty_id = Column(String, ForeignKey("users.id"), nullable=False)
+    title = Column(String, nullable=False)
+    journal_name = Column(String, nullable=False)
+    is_scopus = Column(Boolean, default=False)
+
+class GrievanceTicket(Base):
+    __tablename__ = "grievance_tickets"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    category = Column(String, nullable=False) # ACADEMIC, MAINTENANCE, ANTI_RAGGING
+    description = Column(String, nullable=False)
+    is_anonymous = Column(Boolean, default=True)
+    status = Column(String, default="OPEN")
+    created_at = Column(DateTime, default=datetime.utcnow)
+    escalated_to_principal = Column(Boolean, default=False)
+
+# --- PHASE 3: INVENTORY & ALUMNI ---
+class PurchaseIndent(Base):
+    __tablename__ = "purchase_indents"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    department_id = Column(String, ForeignKey("departments.id"), nullable=False)
+    item_name = Column(String, nullable=False)
+    quantity = Column(Integer, nullable=False)
+    status = Column(String, default="PENDING")
+
+class GoodsReceipt(Base):
+    __tablename__ = "goods_receipts"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    indent_id = Column(String, ForeignKey("purchase_indents.id"), nullable=False)
+    received_date = Column(DateTime, default=datetime.utcnow)
+    asset_id = Column(String, ForeignKey("gl_accounts.id"), nullable=True) # Linked to capitalized asset
+
+class AlumniProfile(Base):
+    __tablename__ = "alumni_profiles"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    user_id = Column(String, ForeignKey("users.id"), unique=True, nullable=False)
+    graduation_year = Column(Integer, nullable=False)
+    current_employer = Column(String, nullable=True)
+    designation = Column(String, nullable=True)
+
+class DonationPledge(Base):
+    __tablename__ = "donation_pledges"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    alumni_id = Column(String, ForeignKey("users.id"), nullable=False)
+    amount = Column(Float, nullable=False)
+    fund_id = Column(String, ForeignKey("funds.id"), nullable=True)
+    is_paid = Column(Boolean, default=False)

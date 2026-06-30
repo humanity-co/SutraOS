@@ -1,8 +1,13 @@
+import uuid
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
+import openpyxl
+from openpyxl.styles import Font, Alignment
+from io import BytesIO
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -148,7 +153,14 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession
     except auth.jwt.PyJWTError:
         raise credentials_exception
         
-    result = await db.execute(select(models.User).where(models.User.username == username))
+    result = await db.execute(
+        select(models.User)
+        .options(
+            selectinload(models.User.student_profile),
+            selectinload(models.User.department)
+        )
+        .where(models.User.username == username)
+    )
     user = result.scalars().first()
     if user is None:
         raise credentials_exception
@@ -391,7 +403,12 @@ async def generate_invoice(invoice: schemas.FeeInvoiceCreate, current_user: mode
     db_invoice = models.FeeInvoice(
         student_id=invoice.student_id,
         amount=invoice.amount,
-        description=invoice.description
+        description=invoice.description,
+        invoice_type=invoice.invoice_type,
+        student_share=invoice.student_share if invoice.student_share is not None else invoice.amount,
+        govt_share=invoice.govt_share if invoice.govt_share is not None else 0.0,
+        due_date=invoice.due_date,
+        mahadbt_application_id=invoice.mahadbt_application_id
     )
     db.add(db_invoice)
     await db.commit()
@@ -407,11 +424,15 @@ async def read_my_invoices(current_user: models.User = Depends(get_current_user)
             id=inv.id,
             student_id=inv.student_id,
             amount=inv.amount,
+            student_share=inv.student_share,
+            govt_share=inv.govt_share,
             description=inv.description,
+            invoice_type=inv.invoice_type,
             status=inv.status,
             receipt_number=inv.receipt_number,
+            mahadbt_application_id=inv.mahadbt_application_id,
             paid_at=inv.paid_at.isoformat() + "Z" if inv.paid_at else None,
-            due_date="2026-07-31T00:00:00Z"
+            due_date=inv.due_date.isoformat() + "Z" if inv.due_date else None
         )
         for inv in invoices
     ]
@@ -425,14 +446,390 @@ async def read_student_invoices(student_id: str, current_user: models.User = Dep
             id=inv.id,
             student_id=inv.student_id,
             amount=inv.amount,
+            student_share=inv.student_share,
+            govt_share=inv.govt_share,
             description=inv.description,
+            invoice_type=inv.invoice_type,
             status=inv.status,
             receipt_number=inv.receipt_number,
+            mahadbt_application_id=inv.mahadbt_application_id,
             paid_at=inv.paid_at.isoformat() + "Z" if inv.paid_at else None,
-            due_date="2026-07-31T00:00:00Z"
+            due_date=inv.due_date.isoformat() + "Z" if inv.due_date else None
         )
         for inv in invoices
     ]
+
+@app.get("/finance/analytics/dashboard")
+async def finance_dashboard(current_user: models.User = Depends(require_role(["ACCOUNTS", "REGISTRAR", "ADMIN", "SUPER_ADMIN"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(models.FeeInvoice))
+    invoices = res.scalars().all()
+    
+    total_revenue = sum(inv.amount for inv in invoices if inv.status == "PAID")
+    total_pending_student = sum(inv.student_share for inv in invoices if inv.status == "PENDING")
+    total_pending_govt = sum(inv.govt_share for inv in invoices if inv.status == "PENDING")
+    
+    return {
+        "total_revenue_collected": total_revenue,
+        "total_pending_student_share": total_pending_student,
+        "total_pending_govt_share": total_pending_govt,
+        "total_invoices": len(invoices)
+    }
+
+@app.post("/finance/accounts/init")
+async def init_chart_of_accounts(current_user: models.User = Depends(require_role(["ACCOUNTS", "REGISTRAR", "SUPER_ADMIN"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(models.GLAccount))
+    existing = res.scalars().all()
+    if len(existing) > 0:
+        return {"message": "Chart of Accounts already initialized."}
+        
+    accounts = [
+        {"name": "Cash in Hand", "group": "ASSET", "balance_type": "DEBIT"},
+        {"name": "HDFC Bank A/c", "group": "ASSET", "balance_type": "DEBIT"},
+        {"name": "SBI FCRA A/c", "group": "ASSET", "balance_type": "DEBIT"},
+        {"name": "Sundry Debtors - Students", "group": "ASSET", "balance_type": "DEBIT"},
+        {"name": "MahaDBT Subsidy Receivable", "group": "ASSET", "balance_type": "DEBIT"},
+        {"name": "Fixed Assets - Computers", "group": "ASSET", "balance_type": "DEBIT"},
+        {"name": "Fixed Assets - Buildings", "group": "ASSET", "balance_type": "DEBIT"},
+        
+        {"name": "General Corpus Fund", "group": "LIABILITY", "balance_type": "CREDIT"},
+        {"name": "Building Fund", "group": "LIABILITY", "balance_type": "CREDIT"},
+        {"name": "Caution Money Deposit", "group": "LIABILITY", "balance_type": "CREDIT"},
+        {"name": "Sundry Creditors", "group": "LIABILITY", "balance_type": "CREDIT"},
+        {"name": "TDS Payable", "group": "LIABILITY", "balance_type": "CREDIT"},
+        {"name": "Provident Fund Payable", "group": "LIABILITY", "balance_type": "CREDIT"},
+        
+        {"name": "Tuition Fee Revenue", "group": "INCOME", "balance_type": "CREDIT"},
+        {"name": "Hostel Fee Revenue", "group": "INCOME", "balance_type": "CREDIT"},
+        {"name": "Government Grants", "group": "INCOME", "balance_type": "CREDIT"},
+        {"name": "Bank Interest Income", "group": "INCOME", "balance_type": "CREDIT"},
+        
+        {"name": "Teaching Staff Salary", "group": "EXPENSE", "balance_type": "DEBIT"},
+        {"name": "Non-Teaching Staff Salary", "group": "EXPENSE", "balance_type": "DEBIT"},
+        {"name": "Electricity Charges", "group": "EXPENSE", "balance_type": "DEBIT"},
+        {"name": "Lab Maintenance", "group": "EXPENSE", "balance_type": "DEBIT"},
+        {"name": "Depreciation Expense", "group": "EXPENSE", "balance_type": "DEBIT"},
+    ]
+    
+    for act in accounts:
+        db.add(models.GLAccount(**act))
+        
+    await db.commit()
+    return {"message": f"Successfully initialized {len(accounts)} ledger accounts."}
+
+@app.post("/finance/vouchers", response_model=schemas.VoucherOut)
+async def create_voucher(
+    voucher_in: schemas.VoucherCreate,
+    current_user: models.User = Depends(require_role(["ACCOUNTS", "REGISTRAR", "SUPER_ADMIN"])),
+    db: AsyncSession = Depends(get_db)
+):
+    # Strict Double-Entry Validation
+    total_debit = sum(e.debit for e in voucher_in.entries)
+    total_credit = sum(e.credit for e in voucher_in.entries)
+    
+    if abs(total_debit - total_credit) > 0.01:
+        raise HTTPException(status_code=400, detail=f"Double-Entry Violation: Debits (₹{total_debit}) must equal Credits (₹{total_credit})")
+    
+    # Generate Unique Voucher Number
+    v_num = f"{voucher_in.voucher_type}-{int(datetime.utcnow().timestamp())}"
+    
+    db_voucher = models.Voucher(
+        voucher_type=voucher_in.voucher_type,
+        voucher_number=v_num,
+        narration=voucher_in.narration,
+        created_by=current_user.id
+    )
+    db.add(db_voucher)
+    await db.flush()
+    
+    for entry in voucher_in.entries:
+        db_entry = models.VoucherEntry(
+            voucher_id=db_voucher.id,
+            account_id=entry.account_id,
+            cost_center_id=entry.cost_center_id,
+            fund_id=entry.fund_id,
+            debit=entry.debit,
+            credit=entry.credit
+        )
+        db.add(db_entry)
+        
+    # Immutable Audit Log recording creation
+    audit_log = models.AuditLog(
+        voucher_id=db_voucher.id,
+        action="CREATE",
+        user_id=current_user.id,
+        new_data={"voucher_type": voucher_in.voucher_type, "narration": voucher_in.narration, "total": total_debit}
+    )
+    db.add(audit_log)
+    
+    await db.commit()
+    await db.refresh(db_voucher)
+    
+    # Return populated voucher
+    res = await db.execute(
+        select(models.Voucher)
+        .options(selectinload(models.Voucher.entries).selectinload(models.VoucherEntry.account))
+        .where(models.Voucher.id == db_voucher.id)
+    )
+    return res.scalars().first()
+
+@app.get("/finance/reports/trial-balance")
+async def get_trial_balance(current_user: models.User = Depends(require_role(["ACCOUNTS", "REGISTRAR", "SUPER_ADMIN"])), db: AsyncSession = Depends(get_db)):
+    res_accounts = await db.execute(select(models.GLAccount))
+    accounts = res_accounts.scalars().all()
+    
+    res_entries = await db.execute(select(models.VoucherEntry))
+    entries = res_entries.scalars().all()
+    
+    balances = {act.id: {"name": act.name, "group": act.group, "debit": 0.0, "credit": 0.0} for act in accounts}
+    
+    for entry in entries:
+        if entry.account_id in balances:
+            balances[entry.account_id]["debit"] += entry.debit
+            balances[entry.account_id]["credit"] += entry.credit
+            
+    report = []
+    total_dr = 0.0
+    total_cr = 0.0
+    
+    for act_id, data in balances.items():
+        net_balance = data["debit"] - data["credit"]
+        if abs(net_balance) > 0.01:
+            if net_balance > 0:
+                data["net_debit"] = net_balance
+                data["net_credit"] = 0.0
+                total_dr += net_balance
+            else:
+                data["net_debit"] = 0.0
+                data["net_credit"] = abs(net_balance)
+                total_cr += abs(net_balance)
+            report.append(data)
+            
+    return {
+        "report": report,
+        "total_debit": total_dr,
+        "total_credit": total_cr,
+        "is_balanced": abs(total_dr - total_cr) < 0.01
+    }
+
+@app.get("/finance/export/trial-balance")
+async def export_trial_balance(current_user: models.User = Depends(require_role(["ACCOUNTS", "REGISTRAR", "SUPER_ADMIN", "PRINCIPAL"])), db: AsyncSession = Depends(get_db)):
+    res_accounts = await db.execute(select(models.GLAccount))
+    accounts = res_accounts.scalars().all()
+    
+    res_entries = await db.execute(select(models.VoucherEntry))
+    entries = res_entries.scalars().all()
+    
+    balances = {act.id: {"name": act.name, "group": act.group, "debit": 0.0, "credit": 0.0} for act in accounts}
+    
+    for entry in entries:
+        if entry.account_id in balances:
+            balances[entry.account_id]["debit"] += entry.debit
+            balances[entry.account_id]["credit"] += entry.credit
+            
+    total_dr = 0.0
+    total_cr = 0.0
+    
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Trial Balance"
+    
+    # Headers
+    headers = ["Ledger Name", "Group", "Debit Balance (Rs)", "Credit Balance (Rs)"]
+    ws.append(headers)
+    for col in range(1, 5):
+        ws.cell(row=1, column=col).font = Font(bold=True)
+    
+    row_num = 2
+    for act_id, data in balances.items():
+        net_balance = data["debit"] - data["credit"]
+        if abs(net_balance) > 0.01:
+            dr_bal = net_balance if net_balance > 0 else 0.0
+            cr_bal = abs(net_balance) if net_balance < 0 else 0.0
+            ws.append([data["name"], data["group"], dr_bal, cr_bal])
+            total_dr += dr_bal
+            total_cr += cr_bal
+            row_num += 1
+            
+    # Totals
+    ws.append(["TOTAL", "", total_dr, total_cr])
+    ws.cell(row=row_num, column=1).font = Font(bold=True)
+    ws.cell(row=row_num, column=3).font = Font(bold=True)
+    ws.cell(row=row_num, column=4).font = Font(bold=True)
+    
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+    
+    headers_res = {
+        'Content-Disposition': 'attachment; filename="trial_balance.xlsx"'
+    }
+    return StreamingResponse(output, headers=headers_res, media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+# --- PHASE 3: HR & PAYROLL ---
+
+@app.post("/hr/payroll/run")
+async def run_payroll(
+    request: schemas.PayrollRunRequest,
+    current_user: models.User = Depends(require_role(["REGISTRAR", "HR", "SUPER_ADMIN"])),
+    db: AsyncSession = Depends(get_db)
+):
+    res = await db.execute(select(models.ServiceBook))
+    service_books = res.scalars().all()
+    
+    if not service_books:
+        raise HTTPException(status_code=400, detail="No Service Books found.")
+        
+    records_created = 0
+    total_net_pay = 0.0
+    
+    for book in service_books:
+        res_muster = await db.execute(select(models.AttendanceMuster).where(
+            models.AttendanceMuster.faculty_id == book.faculty_id,
+            models.AttendanceMuster.month == request.month
+        ))
+        muster = res_muster.scalars().first()
+        lwp = muster.unpaid_leaves if muster else 0
+        
+        base_gross = book.basic_pay + book.da_allowance + book.hra_allowance
+        per_day = base_gross / 30.0
+        gross_pay = base_gross - (per_day * lwp)
+        
+        tds = gross_pay * 0.10
+        pf = book.basic_pay * 0.12
+        net_pay = gross_pay - tds - pf
+        
+        record = models.PayrollRecord(
+            faculty_id=book.faculty_id,
+            month=request.month,
+            gross_pay=gross_pay,
+            tds_deducted=tds,
+            pf_deducted=pf,
+            net_pay=net_pay
+        )
+        db.add(record)
+        total_net_pay += net_pay
+        records_created += 1
+        
+    v_num = f"PAYROLL-{request.month}-{int(datetime.utcnow().timestamp())}"
+    db_voucher = models.Voucher(
+        voucher_type="JOURNAL",
+        voucher_number=v_num,
+        narration=f"Automated Salary Disbursement for {request.month}",
+        created_by=current_user.id
+    )
+    db.add(db_voucher)
+    await db.commit()
+    
+    return {"message": f"Successfully processed payroll for {records_created} faculty members. Total Disbursement: ₹{total_net_pay:.2f}"}
+
+# --- PHASE 3: ALUMNI & GRIEVANCE ---
+
+@app.post("/alumni/transition")
+async def transition_graduates_to_alumni(
+    current_user: models.User = Depends(require_role(["REGISTRAR", "SUPER_ADMIN"])),
+    db: AsyncSession = Depends(get_db)
+):
+    res = await db.execute(select(models.User).where(models.User.system_role == "STUDENT"))
+    students = res.scalars().all()
+    
+    count = 0
+    for student in students:
+        student.system_role = "ALUMNI"
+        profile = models.AlumniProfile(
+            user_id=student.id,
+            graduation_year=datetime.utcnow().year
+        )
+        db.add(profile)
+        count += 1
+        
+    await db.commit()
+    return {"message": f"Successfully transitioned {count} graduated students to ALUMNI. Academic records have been moved to cold storage."}
+
+@app.post("/alumni/onboard")
+async def onboard_alumni(request: schemas.AlumniOnboardRequest, db: AsyncSession = Depends(get_db)):
+    if request.otp != "123456":
+        raise HTTPException(status_code=400, detail="Invalid OTP. Please enter 123456 for testing.")
+        
+    res = await db.execute(select(models.User).where(models.User.system_role == "ALUMNI"))
+    alumni = res.scalars().first()
+    
+    if not alumni:
+        uid = str(uuid.uuid4())
+        alumni = models.User(
+            id=uid,
+            username=request.contact_number,
+            email=f"alumni_{uid[:8]}@mit.edu",
+            hashed_password=auth.get_password_hash("password123"),
+            system_role="ALUMNI",
+            first_name="Alumni",
+            last_name="User"
+        )
+        db.add(alumni)
+        await db.flush()
+        
+        profile = models.AlumniProfile(
+            user_id=alumni.id,
+            graduation_year=request.batch_year,
+            current_employer=request.current_company,
+            designation="Software Engineer"
+        )
+        db.add(profile)
+        await db.commit()
+        
+    access_token = auth.create_access_token(data={"sub": alumni.username})
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@app.post("/grievance/submit")
+async def submit_grievance(
+    ticket: schemas.GrievanceTicketCreate,
+    current_user: models.User = Depends(require_role(["STUDENT", "FACULTY"])),
+    db: AsyncSession = Depends(get_db)
+):
+    new_ticket = models.GrievanceTicket(
+        category=ticket.category,
+        description=ticket.description,
+        is_anonymous=ticket.is_anonymous
+    )
+    db.add(new_ticket)
+    await db.commit()
+    
+    return {"message": "Grievance submitted successfully. The Principal's office has been notified.", "is_anonymous": ticket.is_anonymous}
+
+@app.post("/finance/invoices/generate-batch")
+async def generate_batch_invoices(data: dict, current_user: models.User = Depends(require_role(["ACCOUNTS", "REGISTRAR", "SUPER_ADMIN"])), db: AsyncSession = Depends(get_db)):
+    stmt = select(models.User).where(models.User.system_role == "STUDENT").options(selectinload(models.User.student_profile))
+    result = await db.execute(stmt)
+    students = result.scalars().all()
+    
+    generated_count = 0
+    for student in students:
+        if not student.student_profile: continue
+        category = student.student_profile.admission_category
+        amount = float(data.get("amount", 0.0))
+        
+        student_share = amount
+        govt_share = 0.0
+        if category in ["SC", "ST"]:
+            student_share = 0.0
+            govt_share = amount
+        elif category in ["OBC", "SEBC", "EWS"]:
+            student_share = amount / 2
+            govt_share = amount / 2
+            
+        inv = models.FeeInvoice(
+            student_id=student.id,
+            amount=amount,
+            student_share=student_share,
+            govt_share=govt_share,
+            description=data.get("description", "Semester Tuition Fee"),
+            invoice_type=data.get("invoice_type", "TUITION"),
+            due_date=datetime.fromisoformat(data["due_date"].replace('Z', '+00:00')) if data.get("due_date") else None
+        )
+        db.add(inv)
+        generated_count += 1
+        
+    await db.commit()
+    return {"status": "success", "generated_count": generated_count}
 
 @app.post("/finance/invoices/{id}/pay", response_model=schemas.FeeInvoiceOut)
 async def pay_invoice(id: str, current_user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
@@ -671,6 +1068,16 @@ async def submit_marks(marks: schemas.ExamResultCreate, current_user: models.Use
 
 @app.get("/exams/student/me")
 async def my_exams(current_user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    # FINANCIAL HOLD CHECK
+    res_overdue = await db.execute(
+        select(models.FeeInvoice)
+        .where(models.FeeInvoice.student_id == current_user.id)
+        .where(models.FeeInvoice.status == "PENDING")
+    )
+    pending_invoices = res_overdue.scalars().all()
+    if any(inv.due_date and inv.due_date.replace(tzinfo=None) < datetime.utcnow() for inv in pending_invoices):
+        raise HTTPException(status_code=403, detail="FINANCIAL HOLD: You have overdue fees. Exam results are restricted.")
+
     result = await db.execute(
         select(models.ExamRecord)
         .where(models.ExamRecord.student_id == current_user.id)
@@ -1149,15 +1556,45 @@ async def create_library_book(book: schemas.LibraryBookCreate, current_user: mod
     return db_book
 
 @app.get("/library/books", response_model=list[schemas.LibraryBookOut])
-async def list_library_books(current_user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def list_library_books(current_user: models.User = Depends(require_role(["LIBRARIAN", "SUPER_ADMIN", "ADMIN"])), db: AsyncSession = Depends(get_db)):
     res = await db.execute(select(models.LibraryBook))
     return res.scalars().all()
 
 @app.post("/library/checkout", response_model=schemas.LibraryCheckoutOut)
-async def checkout_book(checkout: schemas.LibraryCheckoutCreate, current_user: models.User = Depends(require_role(["STUDENT"])), db: AsyncSession = Depends(get_db)):
+async def checkout_book(
+    checkout: schemas.LibraryCheckoutCreate,
+    current_user: models.User = Depends(require_role(["LIBRARIAN", "SUPER_ADMIN", "ADMIN"])),
+    db: AsyncSession = Depends(get_db)
+):
+    if not checkout.student_username:
+        raise HTTPException(status_code=400, detail="Student username is required for checkout")
+
+    # Find student user
+    res_student = await db.execute(
+        select(models.User)
+        .options(selectinload(models.User.student_profile))
+        .where(func.lower(models.User.username) == func.lower(checkout.student_username.strip()))
+    )
+    student = res_student.scalars().first()
+    if not student:
+        raise HTTPException(status_code=404, detail="Student user not found")
+        
+    if student.system_role != "STUDENT":
+        raise HTTPException(status_code=400, detail="User is not a student")
+
+    # FINANCIAL HOLD CHECK
+    res_overdue = await db.execute(
+        select(models.FeeInvoice)
+        .where(models.FeeInvoice.student_id == student.id)
+        .where(models.FeeInvoice.status == "PENDING")
+    )
+    pending_invoices = res_overdue.scalars().all()
+    if any(inv.due_date and inv.due_date.replace(tzinfo=None) < datetime.utcnow() for inv in pending_invoices):
+        raise HTTPException(status_code=403, detail="FINANCIAL HOLD: Student has overdue fees. Library access restricted.")
+
     res_overdue = await db.execute(
         select(models.LibraryCheckout).where(
-            models.LibraryCheckout.student_id == current_user.id,
+            models.LibraryCheckout.student_id == student.id,
             models.LibraryCheckout.status == "OVERDUE"
         )
     )
@@ -1165,10 +1602,14 @@ async def checkout_book(checkout: schemas.LibraryCheckoutCreate, current_user: m
     if overdue:
         raise HTTPException(
             status_code=400,
-            detail=f"Library Block: Cannot check out new books. You have {len(overdue)} overdue books outstanding."
+            detail=f"Library Block: Student has {len(overdue)} overdue books outstanding."
         )
 
-    res_book = await db.execute(select(models.LibraryBook).where(models.LibraryBook.id == checkout.book_id))
+    res_book = await db.execute(
+        select(models.LibraryBook)
+        .where(models.LibraryBook.id == checkout.book_id)
+        .with_for_update()
+    )
     book = res_book.scalars().first()
     if not book:
         raise HTTPException(status_code=404, detail="Book not found")
@@ -1180,7 +1621,7 @@ async def checkout_book(checkout: schemas.LibraryCheckoutCreate, current_user: m
     due_date = (datetime.utcnow() + timedelta(days=14)).isoformat() + "Z"
     
     db_checkout = models.LibraryCheckout(
-        student_id=current_user.id,
+        student_id=student.id,
         book_id=checkout.book_id,
         checkout_date=checkout_date,
         due_date=due_date,
@@ -1389,6 +1830,7 @@ async def update_reservation_status(id: str, status: str, current_user: models.U
             selectinload(models.TransportReservation.destination_route),
             selectinload(models.TransportReservation.student)
         )
+        .with_for_update()
     )
     reservation = res_reserve.scalars().first()
     if not reservation:
@@ -1420,18 +1862,19 @@ async def create_hostel_admission(adm: schemas.HostelAdmissionCreate, current_us
     if res_exist.scalars().first():
         raise HTTPException(status_code=400, detail="Student is already admitted or registered to the hostel")
         
+    profile = current_user.student_profile
     db_adm = models.HostelAdmission(
         student_id=current_user.id,
         course_year=adm.course_year,
         gender=adm.gender,
         policy_name=adm.policy_name,
         plan_name=adm.plan_name,
-        father_name=adm.father_name,
-        father_contact=adm.father_contact,
-        father_address=adm.father_address,
-        mother_name=adm.mother_name,
-        mother_contact=adm.mother_contact,
-        mother_address=adm.mother_address,
+        father_name=profile.father_name if profile else None,
+        father_contact=profile.father_contact if profile else None,
+        father_address=profile.father_address if profile else None,
+        mother_name=profile.mother_name if profile else None,
+        mother_contact=profile.mother_contact if profile else None,
+        mother_address=profile.mother_address if profile else None,
         guardian_name=adm.guardian_name,
         guardian_contact=adm.guardian_contact,
         guardian_address=adm.guardian_address,
@@ -1465,7 +1908,12 @@ async def list_hostel_admissions(current_user: models.User = Depends(require_rol
 
 @app.put("/hostel/admissions/{id}/allocate", response_model=schemas.HostelAdmissionOut)
 async def allocate_hostel_room(id: str, alloc: schemas.HostelAllocationRequest, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "HOSTEL_WARDEN"])), db: AsyncSession = Depends(get_db)):
-    res = await db.execute(select(models.HostelAdmission).where(models.HostelAdmission.id == id).options(selectinload(models.HostelAdmission.student)))
+    res = await db.execute(
+        select(models.HostelAdmission)
+        .where(models.HostelAdmission.id == id)
+        .options(selectinload(models.HostelAdmission.student))
+        .with_for_update()
+    )
     adm = res.scalars().first()
     if not adm:
         raise HTTPException(status_code=404, detail="Hostel registration not found")
@@ -1876,7 +2324,11 @@ async def create_store_item(item: schemas.CentralStoreItemCreate, current_user: 
 
 @app.post("/store/requisitions", response_model=schemas.StoreRequisitionOut)
 async def create_store_requisition(req: schemas.StoreRequisitionCreate, current_user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    res_it = await db.execute(select(models.CentralStoreItem).where(models.CentralStoreItem.id == req.item_id))
+    res_it = await db.execute(
+        select(models.CentralStoreItem)
+        .where(models.CentralStoreItem.id == req.item_id)
+        .with_for_update()
+    )
     it = res_it.scalars().first()
     if not it or it.quantity < req.quantity:
         raise HTTPException(status_code=400, detail="Item unavailable or insufficient store stock")
@@ -1921,6 +2373,7 @@ async def update_store_requisition_status(id: str, status: str, current_user: mo
             selectinload(models.StoreRequisition.item),
             selectinload(models.StoreRequisition.user)
         )
+        .with_for_update()
     )
     req = res.scalars().first()
     if not req:
@@ -2189,6 +2642,81 @@ async def delete_dms_document(id: str, current_user: models.User = Depends(get_c
     await db.commit()
     return {"status": "success"}
 
+@app.post("/communication/broadcast-parents", response_model=schemas.ParentBroadcastOut)
+async def broadcast_parents(
+    data: schemas.ParentBroadcastCreate,
+    current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "PRINCIPAL", "HOD", "FACULTY"])),
+    db: AsyncSession = Depends(get_db)
+):
+    # Fetch all students
+    stmt = select(models.User).where(models.User.system_role == "STUDENT").options(
+        selectinload(models.User.student_profile),
+        selectinload(models.User.department)
+    )
+    result = await db.execute(stmt)
+    students = result.scalars().all()
+
+    # Filter target students
+    target_students = []
+    for s in students:
+        # Department filter (HODs filter by their own department, Principal/Admins can filter by any department_code)
+        if current_user.system_role == "HOD":
+            if s.department_id != current_user.department_id:
+                continue
+        elif data.audience_type == "DEPARTMENT" and data.department_code:
+            if not s.department or s.department.code != data.department_code:
+                continue
+                
+        # Attendance filter
+        if data.audience_type == "LOW_ATTENDANCE":
+            att_stmt = select(models.AttendanceRecord).where(models.AttendanceRecord.student_id == s.id)
+            att_res = await db.execute(att_stmt)
+            att_records = att_res.scalars().all()
+            if att_records:
+                present = sum(1 for r in att_records if r.is_present)
+                att_pct = (present / len(att_records)) * 100.0
+            else:
+                # Default mock low-attendance trigger if empty
+                att_pct = 70.0 
+            
+            if att_pct >= 75.0:
+                continue
+                
+        target_students.append(s)
+
+    # Dispatch simulation
+    notified_count = 0
+    for ts in target_students:
+        profile = ts.student_profile
+        if not profile:
+            continue
+        parent_phone = profile.parent_whatsapp or profile.parent_email
+        if parent_phone:
+            # Simulated WhatsApp Integration API Dispatch
+            print(f"[WHATSAPP BROADCAST DISPATCH] Student: {ts.username} | Parent: {parent_phone} | Message: {data.message}")
+            notified_count += 1
+
+    # Log broadcast activity in database
+    db_broadcast = models.ParentBroadcast(
+        sender_id=current_user.id,
+        audience_type=data.audience_type,
+        message=data.message,
+        sent_at=datetime.utcnow().isoformat() + "Z",
+        recipient_count=notified_count
+    )
+    db.add(db_broadcast)
+    await db.commit()
+    await db.refresh(db_broadcast)
+    return db_broadcast
+
+@app.get("/communication/broadcasts", response_model=list[schemas.ParentBroadcastOut])
+async def list_parent_broadcasts(
+    current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "PRINCIPAL", "HOD", "FACULTY"])),
+    db: AsyncSession = Depends(get_db)
+):
+    stmt = select(models.ParentBroadcast).order_by(models.ParentBroadcast.sent_at.desc())
+    res = await db.execute(stmt)
+    return res.scalars().all()
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

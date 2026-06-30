@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { LayoutDashboard, FileText, Calendar, Bell, Search, Send, CheckCircle2, User as UserIcon, Paperclip, File, Video, Image } from 'lucide-react';
+import { useAuth } from './context/AuthContext';
 import api from './api';
 
-export default function Dashboard({ setAuthToken }: { setAuthToken: (t: string | null) => void }) {
+export default function Dashboard() {
+  const { logout } = useAuth();
   const [user, setUser] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   
@@ -25,6 +27,9 @@ export default function Dashboard({ setAuthToken }: { setAuthToken: (t: string |
   const [selectedFileObj, setSelectedFileObj] = useState<any>(null);
   const [customFileName, setCustomFileName] = useState<string>('');
   const [showRenameModal, setShowRenameModal] = useState(false);
+  
+  // Preview State
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
   const navigate = useNavigate();
 
@@ -69,15 +74,14 @@ export default function Dashboard({ setAuthToken }: { setAuthToken: (t: string |
           setTimetable(ttRes.data);
         }
       } catch (err) {
-        localStorage.removeItem('token');
-        setAuthToken(null);
+        logout();
         navigate('/login');
       } finally {
         setLoading(false);
       }
     };
     fetchData();
-  }, [navigate, setAuthToken]);
+  }, [navigate, logout]);
 
 
   const handlePayFees = async (invoiceId: string) => {
@@ -216,6 +220,72 @@ export default function Dashboard({ setAuthToken }: { setAuthToken: (t: string |
 
             {/* Middle Column: Bulletin Board */}
             <div className="lg:col-span-6 space-y-6">
+
+              {/* PRINCIPAL COMMAND CENTER */}
+              {user?.system_role === 'PRINCIPAL' && (
+                <div className="bg-gradient-to-r from-red-600 to-rose-700 rounded-3xl p-6 text-white shadow-lg mb-6 animate-in fade-in slide-in-from-top-4 duration-500">
+                  <div className="flex items-center gap-3 mb-4">
+                    <div className="p-2 bg-white/20 rounded-xl">
+                      <Bell className="w-6 h-6 text-white" />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-bold">UGC Grievance Command Center</h2>
+                      <p className="text-rose-100 text-sm">Secure Portal: Escalated Anonymous Tickets</p>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-3">
+                    <div className="bg-white/10 rounded-2xl p-4 border border-white/20 flex justify-between items-center hover:bg-white/20 transition-colors cursor-pointer">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-1 rounded-full">ANTI-RAGGING</span>
+                          <span className="text-sm font-semibold opacity-90">Ticket #892-A</span>
+                        </div>
+                        <p className="text-sm font-medium">Anonymous report from Men's Hostel Block C regarding harassment.</p>
+                      </div>
+                      <button className="bg-white text-red-600 px-4 py-2 rounded-xl text-sm font-bold shadow-sm">Resolve</button>
+                    </div>
+                    
+                    <div className="bg-white/10 rounded-2xl p-4 border border-white/20 flex justify-between items-center hover:bg-white/20 transition-colors cursor-pointer">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="bg-amber-500 text-white text-[10px] font-bold px-2 py-1 rounded-full">ACADEMIC</span>
+                          <span className="text-sm font-semibold opacity-90">Ticket #771-B</span>
+                        </div>
+                        <p className="text-sm font-medium">Multiple students reporting syllabus incompletion for Subject CSE301.</p>
+                      </div>
+                      <button className="bg-white text-red-600 px-4 py-2 rounded-xl text-sm font-bold shadow-sm">Resolve</button>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
+              {/* ALUMNI ENDOWMENT PORTAL */}
+              {user?.system_role === 'ALUMNI' && (
+                <div className="bg-gradient-to-br from-indigo-900 via-blue-900 to-indigo-800 rounded-3xl p-8 text-white shadow-xl mb-6 relative overflow-hidden animate-in fade-in slide-in-from-top-4 duration-500">
+                  <div className="absolute top-0 right-0 p-8 opacity-10">
+                    <UserIcon className="w-48 h-48" />
+                  </div>
+                  <div className="relative z-10">
+                    <h2 className="text-3xl font-bold mb-2">Welcome Back, Alumni!</h2>
+                    <p className="text-indigo-200 mb-6 max-w-md">Your contributions help SutraOS University build state-of-the-art labs and provide scholarships to underprivileged students.</p>
+                    
+                    <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 border border-white/20 inline-block w-full max-w-md">
+                      <h3 className="font-bold text-lg mb-4 text-white flex items-center gap-2">
+                        <span className="text-emerald-400">●</span> Corpus Fund Donation
+                      </h3>
+                      <div className="flex items-center gap-3 mb-4">
+                        <button className="flex-1 bg-white/20 hover:bg-white/30 py-2 rounded-xl font-bold transition-colors">₹5,000</button>
+                        <button className="flex-1 bg-white/20 hover:bg-white/30 py-2 rounded-xl font-bold transition-colors">₹10,000</button>
+                        <button className="flex-1 bg-white text-indigo-900 py-2 rounded-xl font-bold transition-colors shadow-lg">Custom</button>
+                      </div>
+                      <button className="w-full bg-emerald-500 hover:bg-emerald-600 text-white font-bold py-3 rounded-xl shadow-lg transition-colors">
+                        Donate Now (80G Tax Exempt)
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
               
               {/* Compose Bento */}
               <div className="bg-white rounded-3xl p-2 shadow-sm border border-slate-200/60 focus-within:shadow-md focus-within:border-blue-300 transition-all">
@@ -307,15 +377,23 @@ export default function Dashboard({ setAuthToken }: { setAuthToken: (t: string |
                             <div className="text-[9px] text-slate-400 font-semibold">{post.attachment_type} Document</div>
                           </div>
                         </div>
-                        <a 
-                          href={post.attachment_url.startsWith('http') ? post.attachment_url : `http://localhost:8000${post.attachment_url}`}
-                          download={post.attachment_url.split('/').pop()}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="text-blue-600 hover:text-blue-700 text-xs font-bold bg-white hover:bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm transition-colors flex items-center justify-center"
-                        >
-                          Download
-                        </a>
+                        <div className="flex gap-2">
+                          <a 
+                            href={post.attachment_url.startsWith('http') ? post.attachment_url : `http://localhost:8000${post.attachment_url}`}
+                            download={post.attachment_url.split('/').pop()}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-blue-600 hover:text-blue-700 text-xs font-bold bg-white hover:bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm transition-colors flex items-center justify-center"
+                          >
+                            Download
+                          </a>
+                          <button
+                            onClick={() => setPreviewUrl(post.attachment_url.startsWith('http') ? post.attachment_url : `http://localhost:8000${post.attachment_url}`)}
+                            className="text-emerald-600 hover:text-emerald-700 text-xs font-bold bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-lg border border-emerald-200 shadow-sm transition-colors flex items-center justify-center"
+                          >
+                            Preview
+                          </button>
+                        </div>
                       </div>
                     )}
                   </div>
@@ -425,6 +503,39 @@ export default function Dashboard({ setAuthToken }: { setAuthToken: (t: string |
                   Cancel
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DOCUMENT PREVIEW MODAL */}
+      {previewUrl && (
+        <div className="fixed inset-0 z-[100] bg-slate-900/90 backdrop-blur-sm flex flex-col items-center justify-center p-4 sm:p-8 animate-in fade-in duration-200">
+          <div className="w-full max-w-6xl h-full bg-white rounded-3xl overflow-hidden flex flex-col shadow-2xl border border-white/20">
+            <div className="flex justify-between items-center p-4 border-b border-slate-100 bg-slate-50">
+              <h3 className="font-bold text-slate-800">Secure Document Preview</h3>
+              <div className="flex gap-2">
+                <a 
+                  href={previewUrl}
+                  download
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-sm transition-colors"
+                >
+                  Download File
+                </a>
+                <button 
+                  onClick={() => setPreviewUrl(null)}
+                  className="bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2 rounded-xl text-sm font-bold shadow-sm transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 w-full bg-slate-100/50 p-4">
+              <iframe 
+                src={previewUrl} 
+                className="w-full h-full rounded-2xl border border-slate-200 bg-white"
+                title="Document Preview"
+              />
             </div>
           </div>
         </div>

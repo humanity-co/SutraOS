@@ -1,33 +1,19 @@
-import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { LogOut } from 'lucide-react';
 import api from './api';
+import { useAuth } from './context/AuthContext';
 
 interface LayoutProps {
   children: React.ReactNode;
-  setAuthToken: (t: string | null) => void;
 }
 
-export default function Layout({ children, setAuthToken }: LayoutProps) {
-  const [user, setUser] = useState<any>(null);
+export default function Layout({ children }: LayoutProps) {
+  const { user, logout } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
 
-  useEffect(() => {
-    const fetchUser = async () => {
-      try {
-        const res = await api.get('/users/me');
-        setUser(res.data);
-      } catch (err) {
-        // Handled by the child component or just ignore if it's a random failure
-      }
-    };
-    fetchUser();
-  }, []);
-
   const handleLogout = () => {
-    localStorage.removeItem('token');
-    setAuthToken(null);
+    logout();
     navigate('/login');
   };
 
@@ -49,7 +35,8 @@ export default function Layout({ children, setAuthToken }: LayoutProps) {
     { name: 'Facilities', path: '/facilities', roles: ['ALL'] },
     { name: 'Research', path: '/research', roles: ['ALL'] },
     { name: 'Documents', path: '/documents', roles: ['ALL'] },
-    { name: 'Finance & HR', path: '/finance-hr', roles: ['SUPER_ADMIN', 'PRINCIPAL', 'ACCOUNTS', 'FACULTY', 'STUDENT', 'HOD', 'REGISTRAR'] },
+    { name: 'Finance (CA Ledger)', path: '/finance', roles: ['SUPER_ADMIN', 'PRINCIPAL', 'ACCOUNTS', 'REGISTRAR'] },
+    { name: 'My HR', path: '/myhr', roles: ['SUPER_ADMIN', 'PRINCIPAL', 'HOD', 'FACULTY', 'REGISTRAR', 'HR'] },
     { name: 'Placements & Campus', path: '/placements-campus', roles: ['SUPER_ADMIN', 'PRINCIPAL', 'PLACEMENT_OFFICER', 'HOD', 'STUDENT'] }
   ];
 
