@@ -3,13 +3,15 @@ import { useNavigate } from 'react-router-dom';
 import { Eye, EyeOff } from 'lucide-react';
 import api from './api';
 
-export default function Login({ setAuthToken }: { setAuthToken: (t: string) => void }) {
+export default function Login({ setAuthToken }: { setAuthToken: (t: string | null) => void }) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+
+
 
   const handleLogin = async (e?: React.FormEvent, demoUser?: string, demoPass?: string) => {
     if (e) e.preventDefault();
@@ -38,6 +40,8 @@ export default function Login({ setAuthToken }: { setAuthToken: (t: string) => v
       setLoading(false);
     }
   };
+
+
 
   return (
     <div className="flex min-h-screen bg-slate-50 w-full animate-fade-in">
@@ -106,13 +110,11 @@ export default function Login({ setAuthToken }: { setAuthToken: (t: string) => v
             <button 
               type="submit" 
               disabled={loading}
-              className="w-full bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold py-2.5 rounded-md shadow-md hover:shadow-lg transition-all active:scale-[0.98] mt-2 flex justify-center items-center"
+              className="w-full bg-slate-900 hover:bg-slate-850 text-white text-sm font-semibold py-2.5 rounded-md shadow-md hover:shadow-lg transition-all active:scale-[0.98] mt-2 flex justify-center items-center"
             >
               {loading ? 'Authenticating...' : 'Sign In'}
             </button>
           </form>
-
-
         </div>
       </div>
     </div>

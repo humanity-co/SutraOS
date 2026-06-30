@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Briefcase, Building, ChevronRight, Send, CheckCircle2, Plus, Globe, Check, X } from 'lucide-react';
+import { Briefcase, Building, ChevronRight, Send, CheckCircle2, Plus, Check, X } from 'lucide-react';
 import api from './api';
+import StudentDetailModal from './StudentDetailModal';
 
 export default function PlacementsCampus({ setAuthToken }: { setAuthToken: (t: string | null) => void }) {
   const [user, setUser] = useState<any>(null);
@@ -11,6 +12,7 @@ export default function PlacementsCampus({ setAuthToken }: { setAuthToken: (t: s
     company_name: '', role: '', ctc: '', min_cgpa: 6.0, drive_date: ''
   });
   const [selectedDepts, setSelectedDepts] = useState<string[]>([]);
+  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
 
   // Off-Campus States
   const [myOffCampus, setMyOffCampus] = useState<any | null>(null);
@@ -369,9 +371,12 @@ export default function PlacementsCampus({ setAuthToken }: { setAuthToken: (t: s
                       ) : (
                         offCampusList.map(op => (
                           <tr key={op.id} className="hover:bg-slate-50/50">
-                            <td className="p-4 text-sm font-bold text-slate-700">
-                              {op.student?.first_name} {op.student?.last_name}
-                            </td>
+                            <td 
+                               onClick={() => setSelectedStudentId(op.student_id)}
+                               className="p-4 text-sm font-bold text-slate-700 hover:text-blue-600 hover:underline cursor-pointer"
+                             >
+                               {op.student?.first_name} {op.student?.last_name}
+                             </td>
                             <td className="p-4 text-sm font-semibold text-slate-600">
                               {op.company_name} <br/> <span className="text-xs font-medium text-slate-400">{op.job_profile}</span>
                             </td>
@@ -555,6 +560,11 @@ export default function PlacementsCampus({ setAuthToken }: { setAuthToken: (t: s
           </div>
         </div>
       )}
+      <StudentDetailModal 
+        studentId={selectedStudentId} 
+        isOpen={selectedStudentId !== null} 
+        onClose={() => setSelectedStudentId(null)} 
+      />
     </div>
   );
 }

@@ -2,6 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
@@ -155,7 +156,11 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession
 
 def require_role(allowed_roles: list[str]):
     async def dependency(current_user: models.User = Depends(get_current_user)):
-        if current_user.system_role not in allowed_roles:
+        user_roles = [current_user.system_role]
+        if current_user.additional_roles:
+            if isinstance(current_user.additional_roles, list):
+                user_roles.extend(current_user.additional_roles)
+        if not any(role in allowed_roles for role in user_roles):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Not authorized to perform this action"
@@ -197,6 +202,40 @@ async def read_users_me(current_user: models.User = Depends(get_current_user)):
 async def list_users(db: AsyncSession = Depends(get_db), current_user: models.User = Depends(get_current_user)):
     result = await db.execute(select(models.User))
     return result.scalars().all()
+
+class UserRolesUpdate(BaseModel):
+    additional_roles: list[str]
+
+@app.put("/users/{id}/roles", response_model=schemas.UserOut)
+async def update_user_roles(id: str, roles_data: UserRolesUpdate, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "PRINCIPAL", "REGISTRAR"])), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(models.User).where(models.User.id == id))
+    user = result.scalars().first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Update additional roles list
+    user.additional_roles = roles_data.additional_roles
+    await db.commit()
+    await db.refresh(user)
+    return user
+
+@app.get("/users/{id}", response_model=schemas.UserOut)
+async def get_user_by_id(id: str, db: AsyncSession = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    if current_user.system_role == "STUDENT" and current_user.id != id:
+        raise HTTPException(status_code=403, detail="Access denied")
+        
+    result = await db.execute(
+        select(models.User)
+        .options(
+            selectinload(models.User.student_profile),
+            selectinload(models.User.department)
+        )
+        .where(models.User.id == id)
+    )
+    user = result.scalars().first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
 
 # --- DEPARTMENTS ENDPOINTS ---
 
@@ -362,6 +401,24 @@ async def generate_invoice(invoice: schemas.FeeInvoiceCreate, current_user: mode
 @app.get("/finance/invoices/me", response_model=list[schemas.FeeInvoiceOut])
 async def read_my_invoices(current_user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(models.FeeInvoice).where(models.FeeInvoice.student_id == current_user.id))
+    invoices = result.scalars().all()
+    return [
+        schemas.FeeInvoiceOut(
+            id=inv.id,
+            student_id=inv.student_id,
+            amount=inv.amount,
+            description=inv.description,
+            status=inv.status,
+            receipt_number=inv.receipt_number,
+            paid_at=inv.paid_at.isoformat() + "Z" if inv.paid_at else None,
+            due_date="2026-07-31T00:00:00Z"
+        )
+        for inv in invoices
+    ]
+
+@app.get("/finance/invoices/student/{student_id}", response_model=list[schemas.FeeInvoiceOut])
+async def read_student_invoices(student_id: str, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "REGISTRAR", "ACCOUNTS", "HOD", "FACULTY", "PLACEMENT_OFFICER"])), db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(models.FeeInvoice).where(models.FeeInvoice.student_id == student_id))
     invoices = result.scalars().all()
     return [
         schemas.FeeInvoiceOut(
@@ -705,6 +762,28 @@ async def approve_gatepass(id: str, current_user: models.User = Depends(require_
         gp.status = "APPROVED"
         await db.commit()
     return {"status": "success"}
+
+@app.post("/campus/gatepass/{id}/verify-signature", response_model=schemas.GatepassRequestOut)
+async def verify_gatepass_signature(id: str, current_user: models.User = Depends(require_role(["STUDENT"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(models.GatepassRequest).where(models.GatepassRequest.id == id).options(selectinload(models.GatepassRequest.student)))
+    gp = res.scalars().first()
+    if not gp:
+        raise HTTPException(status_code=404, detail="Gatepass request not found")
+    gp.signature_verified = True
+    await db.commit()
+    await db.refresh(gp)
+    return gp
+
+@app.put("/campus/gatepass/{id}/status", response_model=schemas.GatepassRequestOut)
+async def update_gatepass_status(id: str, status: str, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "HOSTEL_WARDEN"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(models.GatepassRequest).where(models.GatepassRequest.id == id).options(selectinload(models.GatepassRequest.student)))
+    gp = res.scalars().first()
+    if not gp:
+        raise HTTPException(status_code=404, detail="Gatepass request not found")
+    gp.status = status
+    await db.commit()
+    await db.refresh(gp)
+    return gp
 
 # --- NEW FUNCTIONAL PARITY ROUTES ---
 
@@ -1154,6 +1233,17 @@ async def list_my_checkouts(current_user: models.User = Depends(require_role(["S
     )
     return res.scalars().all()
 
+@app.get("/library/checkouts", response_model=list[schemas.LibraryCheckoutOut])
+async def list_all_checkouts(current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "LIBRARIAN"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(models.LibraryCheckout)
+        .options(
+            selectinload(models.LibraryCheckout.book),
+            selectinload(models.LibraryCheckout.student)
+        )
+    )
+    return res.scalars().all()
+
 
 # --- TRANSPORT ROUTING ---
 @app.post("/transport/stops", response_model=schemas.BusStopOut)
@@ -1200,6 +1290,10 @@ async def create_bus_route(route: schemas.BusRouteCreate, current_user: models.U
 async def list_bus_routes(current_user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     res = await db.execute(select(models.BusRoute).options(selectinload(models.BusRoute.stops)))
     return res.scalars().all()
+
+@app.post("/transport/reservations", response_model=schemas.TransportReservationOut)
+async def reserve_seat_alias(reserve: schemas.TransportReservationCreate, current_user: models.User = Depends(require_role(["STUDENT"])), db: AsyncSession = Depends(get_db)):
+    return await reserve_seat(reserve, current_user, db)
 
 @app.post("/transport/reserve", response_model=schemas.TransportReservationOut)
 async def reserve_seat(reserve: schemas.TransportReservationCreate, current_user: models.User = Depends(require_role(["STUDENT"])), db: AsyncSession = Depends(get_db)):
@@ -1321,37 +1415,76 @@ async def update_reservation_status(id: str, status: str, current_user: models.U
 
 # --- HOSTEL ROUTING ---
 @app.post("/hostel/admissions", response_model=schemas.HostelAdmissionOut)
-async def create_hostel_admission(adm: schemas.HostelAdmissionCreate, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "HOSTEL_WARDEN", "STUDENT"])), db: AsyncSession = Depends(get_db)):
-    if current_user.system_role == "STUDENT" and adm.student_id != current_user.id:
-        raise HTTPException(status_code=403, detail="Students can only register themselves")
-        
-    # Check if already admitted
-    res_exist = await db.execute(select(models.HostelAdmission).where(models.HostelAdmission.student_id == adm.student_id))
+async def create_hostel_admission(adm: schemas.HostelAdmissionCreate, current_user: models.User = Depends(require_role(["STUDENT"])), db: AsyncSession = Depends(get_db)):
+    res_exist = await db.execute(select(models.HostelAdmission).where(models.HostelAdmission.student_id == current_user.id))
     if res_exist.scalars().first():
-        raise HTTPException(status_code=400, detail="Student is already admitted to the hostel")
+        raise HTTPException(status_code=400, detail="Student is already admitted or registered to the hostel")
         
-    db_adm = models.HostelAdmission(**adm.dict())
+    db_adm = models.HostelAdmission(
+        student_id=current_user.id,
+        course_year=adm.course_year,
+        gender=adm.gender,
+        policy_name=adm.policy_name,
+        plan_name=adm.plan_name,
+        father_name=adm.father_name,
+        father_contact=adm.father_contact,
+        father_address=adm.father_address,
+        mother_name=adm.mother_name,
+        mother_contact=adm.mother_contact,
+        mother_address=adm.mother_address,
+        guardian_name=adm.guardian_name,
+        guardian_contact=adm.guardian_contact,
+        guardian_address=adm.guardian_address,
+        vehicle_number=adm.vehicle_number,
+        license_number=adm.license_number,
+        block_name="NA",
+        floor_name="NA",
+        room_number="NA",
+        status="PENDING",
+        parent_consent_approved=True
+    )
     db.add(db_adm)
+    await db.commit()
+    await db.refresh(db_adm)
     
-    # Automatically generate hostel fee invoice
+    res = await db.execute(select(models.HostelAdmission).where(models.HostelAdmission.id == db_adm.id).options(selectinload(models.HostelAdmission.student)))
+    return res.scalars().first()
+
+@app.get("/hostel/admissions/me", response_model=schemas.HostelAdmissionOut)
+async def get_my_hostel_admission(current_user: models.User = Depends(require_role(["STUDENT"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(models.HostelAdmission).where(models.HostelAdmission.student_id == current_user.id).options(selectinload(models.HostelAdmission.student)))
+    adm = res.scalars().first()
+    if not adm:
+        raise HTTPException(status_code=404, detail="Hostel admission not found for this student")
+    return adm
+
+@app.get("/hostel/admissions", response_model=list[schemas.HostelAdmissionOut])
+async def list_hostel_admissions(current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "HOSTEL_WARDEN"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(models.HostelAdmission).options(selectinload(models.HostelAdmission.student)))
+    return res.scalars().all()
+
+@app.put("/hostel/admissions/{id}/allocate", response_model=schemas.HostelAdmissionOut)
+async def allocate_hostel_room(id: str, alloc: schemas.HostelAllocationRequest, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "HOSTEL_WARDEN"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(models.HostelAdmission).where(models.HostelAdmission.id == id).options(selectinload(models.HostelAdmission.student)))
+    adm = res.scalars().first()
+    if not adm:
+        raise HTTPException(status_code=404, detail="Hostel registration not found")
+        
+    adm.block_name = alloc.block_name
+    adm.floor_name = alloc.floor_name
+    adm.room_number = alloc.room_number
+    adm.status = "APPROVED"
+    
     fee = models.FeeInvoice(
         student_id=adm.student_id,
         amount=50000.0,
-        description=f"Hostel Fees - Room {adm.room_number} ({adm.block_name})",
+        description=f"Hostel Room Fees - Block: {alloc.block_name}, Floor: {alloc.floor_name}, Room: {alloc.room_number}",
         status="PENDING"
     )
     db.add(fee)
     
     await db.commit()
-    await db.refresh(db_adm)
-    return db_adm
-
-@app.get("/hostel/admissions/me", response_model=schemas.HostelAdmissionOut)
-async def get_my_hostel_admission(current_user: models.User = Depends(require_role(["STUDENT"])), db: AsyncSession = Depends(get_db)):
-    res = await db.execute(select(models.HostelAdmission).where(models.HostelAdmission.student_id == current_user.id))
-    adm = res.scalars().first()
-    if not adm:
-        raise HTTPException(status_code=404, detail="Hostel admission not found for this student")
+    await db.refresh(adm)
     return adm
 
 # --- OFF CAMPUS PLACEMENTS ---
@@ -1404,19 +1537,658 @@ async def get_my_off_campus_placement(current_user: models.User = Depends(requir
         raise HTTPException(status_code=404, detail="No off-campus placement application found")
     return op
 
-@app.put("/placements/off-campus/{id}/status")
-async def update_off_campus_status(id: str, status: str, current_user: models.User = Depends(require_role(["PLACEMENT_OFFICER", "SUPER_ADMIN", "ADMIN"])), db: AsyncSession = Depends(get_db)):
-    if status not in ["APPROVED", "REJECTED", "PENDING"]:
-        raise HTTPException(status_code=400, detail="Invalid status")
-        
-    res = await db.execute(select(models.OffCampusPlacement).where(models.OffCampusPlacement.id == id))
+@app.get("/placements/off-campus/student/{student_id}", response_model=schemas.OffCampusPlacementOut)
+async def get_student_off_campus_placement(
+    student_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: models.User = Depends(get_current_user)
+):
+    res = await db.execute(
+        select(models.OffCampusPlacement)
+        .where(models.OffCampusPlacement.student_id == student_id)
+        .options(selectinload(models.OffCampusPlacement.student))
+    )
     op = res.scalars().first()
     if not op:
-        raise HTTPException(status_code=404, detail="Off-campus placement record not found")
+        raise HTTPException(status_code=404, detail="No off-campus placement application found")
+    return op
+
+@app.put("/placements/off-campus/{id}/status", response_model=schemas.OffCampusPlacementOut)
+async def update_off_campus_placement_status(
+    id: str,
+    status: str,
+    current_user: models.User = Depends(require_role(["PLACEMENT_OFFICER", "SUPER_ADMIN", "ADMIN"])),
+    db: AsyncSession = Depends(get_db)
+):
+    res = await db.execute(
+        select(models.OffCampusPlacement)
+        .where(models.OffCampusPlacement.id == id)
+        .options(selectinload(models.OffCampusPlacement.student))
+    )
+    op = res.scalars().first()
+    if not op:
+        raise HTTPException(status_code=404, detail="Off-campus placement request not found")
+    
+    if status not in ["APPROVED", "REJECTED"]:
+        raise HTTPException(status_code=400, detail="Invalid status")
         
     op.status = status
     await db.commit()
-    return {"status": "updated", "id": id, "new_status": status}
+    await db.refresh(op)
+    
+    # Log placement offer for dashboard tracking
+    if status == "APPROVED":
+        res_offer = await db.execute(select(models.PlacementOffer).where(models.PlacementOffer.student_id == op.student_id))
+        if not res_offer.scalars().first():
+            db_offer = models.PlacementOffer(
+                student_id=op.student_id,
+                company_name=op.company_name,
+                job_profile=op.job_profile,
+                salary_package=op.after_confirmation_salary,
+                offer_letter_url="/uploads/offcampus_letter.pdf"
+            )
+            db.add(db_offer)
+            await db.commit()
+            
+    return op
+
+
+# --- LIBRARIAN ADDITIONAL ENDPOINTS ---
+@app.post("/library/books", response_model=schemas.LibraryBookOut)
+async def add_library_book(book_data: schemas.LibraryBookCreate, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "LIBRARIAN"])), db: AsyncSession = Depends(get_db)):
+    db_book = models.LibraryBook(
+        title=book_data.title,
+        author=book_data.author,
+        isbn=book_data.isbn,
+        total_copies=book_data.total_copies,
+        available_copies=book_data.total_copies
+    )
+    db.add(db_book)
+    await db.commit()
+    await db.refresh(db_book)
+    return db_book
+
+@app.put("/library/checkouts/{id}/return", response_model=schemas.LibraryCheckoutOut)
+async def return_library_book(id: str, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "LIBRARIAN"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(models.LibraryCheckout)
+        .where(models.LibraryCheckout.id == id)
+        .options(selectinload(models.LibraryCheckout.book))
+    )
+    checkout = res.scalars().first()
+    if not checkout:
+        raise HTTPException(status_code=404, detail="Checkout record not found")
+    if checkout.status == "RETURNED":
+        return checkout
+        
+    checkout.returned_at = datetime.utcnow().isoformat()
+    checkout.status = "RETURNED"
+    checkout.book.available_copies = min(checkout.book.available_copies + 1, checkout.book.total_copies)
+    await db.commit()
+    await db.refresh(checkout)
+    return checkout
+
+# --- MESS ENDPOINTS ---
+@app.get("/mess/menu", response_model=list[schemas.MessMenuOut])
+async def list_mess_menu(db: AsyncSession = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    res = await db.execute(select(models.MessMenu))
+    return res.scalars().all()
+
+class MessMenuUpdate(BaseModel):
+    breakfast: str
+    lunch: str
+    snacks: str
+    dinner: str
+
+@app.put("/mess/menu/{day}", response_model=schemas.MessMenuOut)
+async def update_mess_menu(day: str, menu_data: MessMenuUpdate, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "MESS_IN_CHARGE"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(models.MessMenu).where(models.MessMenu.day_of_week == day))
+    menu = res.scalars().first()
+    if not menu:
+        menu = models.MessMenu(day_of_week=day, breakfast="", lunch="", snacks="", dinner="")
+        db.add(menu)
+    menu.breakfast = menu_data.breakfast
+    menu.lunch = menu_data.lunch
+    menu.snacks = menu_data.snacks
+    menu.dinner = menu_data.dinner
+    await db.commit()
+    await db.refresh(menu)
+    return menu
+
+@app.get("/mess/feedback", response_model=list[schemas.MessFeedbackOut])
+async def list_mess_feedback(current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "MESS_IN_CHARGE"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(models.MessFeedback).options(selectinload(models.MessFeedback.student)))
+    return res.scalars().all()
+
+@app.post("/mess/feedback", response_model=schemas.MessFeedbackOut)
+async def submit_mess_feedback(feedback: schemas.MessFeedbackCreate, current_user: models.User = Depends(require_role(["STUDENT"])), db: AsyncSession = Depends(get_db)):
+    db_feedback = models.MessFeedback(
+        student_id=current_user.id,
+        rating=feedback.rating,
+        review=feedback.review,
+        created_at=datetime.utcnow().isoformat()
+    )
+    db.add(db_feedback)
+    await db.commit()
+    await db.refresh(db_feedback)
+    return db_feedback
+
+@app.get("/mess/grocery", response_model=list[schemas.MessGroceryOut])
+async def list_mess_grocery(current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "MESS_IN_CHARGE"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(models.MessGrocery))
+    return res.scalars().all()
+
+@app.post("/mess/grocery/{id}/restock", response_model=schemas.MessGroceryOut)
+async def restock_grocery(id: str, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "MESS_IN_CHARGE"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(models.MessGrocery).where(models.MessGrocery.id == id))
+    item = res.scalars().first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Grocery item not found")
+    item.current_stock += 100.0
+    await db.commit()
+    await db.refresh(item)
+    return item
+
+# --- SPORTS ENDPOINTS ---
+@app.get("/sports/equipment", response_model=list[schemas.SportsEquipmentOut])
+async def list_sports_equipment(db: AsyncSession = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    res = await db.execute(select(models.SportsEquipment))
+    return res.scalars().all()
+
+@app.post("/sports/equipment", response_model=schemas.SportsEquipmentOut)
+async def create_sports_equipment(eq: schemas.SportsEquipmentCreate, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "SPORTS_OFFICER"])), db: AsyncSession = Depends(get_db)):
+    db_eq = models.SportsEquipment(
+        name=eq.name,
+        total_qty=eq.total_qty,
+        available_qty=eq.total_qty
+    )
+    db.add(db_eq)
+    await db.commit()
+    await db.refresh(db_eq)
+    return db_eq
+
+@app.post("/sports/issue", response_model=schemas.SportsIssueRequestOut)
+async def request_sports_equipment(req: schemas.SportsIssueRequestCreate, current_user: models.User = Depends(require_role(["STUDENT"])), db: AsyncSession = Depends(get_db)):
+    res_eq = await db.execute(select(models.SportsEquipment).where(models.SportsEquipment.id == req.equipment_id))
+    eq = res_eq.scalars().first()
+    if not eq or eq.available_qty < req.quantity:
+        raise HTTPException(status_code=400, detail="Equipment unavailable or insufficient quantity")
+    
+    db_req = models.SportsIssueRequest(
+        student_id=current_user.id,
+        equipment_id=req.equipment_id,
+        quantity=req.quantity,
+        status="PENDING",
+        request_date=datetime.utcnow().isoformat()
+    )
+    db.add(db_req)
+    await db.commit()
+    
+    res_loaded = await db.execute(
+        select(models.SportsIssueRequest)
+        .where(models.SportsIssueRequest.id == db_req.id)
+        .options(
+            selectinload(models.SportsIssueRequest.student),
+            selectinload(models.SportsIssueRequest.equipment)
+        )
+    )
+    return res_loaded.scalars().first()
+
+@app.get("/sports/issue", response_model=list[schemas.SportsIssueRequestOut])
+async def list_sports_issue_requests(current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "SPORTS_OFFICER"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(models.SportsIssueRequest)
+        .options(
+            selectinload(models.SportsIssueRequest.student),
+            selectinload(models.SportsIssueRequest.equipment)
+        )
+    )
+    return res.scalars().all()
+
+@app.put("/sports/issue/{id}/status", response_model=schemas.SportsIssueRequestOut)
+async def update_sports_issue_status(id: str, status: str, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "SPORTS_OFFICER"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(models.SportsIssueRequest)
+        .where(models.SportsIssueRequest.id == id)
+        .options(
+            selectinload(models.SportsIssueRequest.equipment),
+            selectinload(models.SportsIssueRequest.student)
+        )
+    )
+    req = res.scalars().first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Issue request not found")
+        
+    if status == "APPROVED" and req.status == "PENDING":
+        if req.equipment.available_qty < req.quantity:
+            raise HTTPException(status_code=400, detail="Insufficient stock")
+        req.equipment.available_qty -= req.quantity
+        req.status = "APPROVED"
+    elif status == "RETURNED" and req.status == "APPROVED":
+        req.equipment.available_qty = min(req.equipment.available_qty + req.quantity, req.equipment.total_qty)
+        req.status = "RETURNED"
+        req.returned_at = datetime.utcnow().isoformat()
+        
+    await db.commit()
+    await db.refresh(req)
+    return req
+
+@app.get("/sports/tournaments", response_model=list[schemas.SportsTournamentOut])
+async def list_sports_tournaments(db: AsyncSession = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    res = await db.execute(select(models.SportsTournament).options(selectinload(models.SportsTournament.registered_by)))
+    return res.scalars().all()
+
+@app.post("/sports/tournaments", response_model=schemas.SportsTournamentOut)
+async def register_sports_tournament(req: schemas.SportsTournamentCreate, current_user: models.User = Depends(require_role(["STUDENT"])), db: AsyncSession = Depends(get_db)):
+    db_tour = models.SportsTournament(
+        team_name=req.team_name,
+        sport_name=req.sport_name,
+        members_count=req.members_count,
+        registered_by_id=current_user.id,
+        registered_at=datetime.utcnow().isoformat()
+    )
+    db.add(db_tour)
+    await db.commit()
+    await db.refresh(db_tour)
+    return db_tour
+
+# --- ESTATE MAINTENANCE ENDPOINTS ---
+@app.post("/maintenance/tickets", response_model=schemas.MaintenanceTicketOut)
+async def create_maintenance_ticket(ticket: schemas.MaintenanceTicketCreate, current_user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    db_ticket = models.EstateMaintenanceTicket(
+        reporter_id=current_user.id,
+        category=ticket.category,
+        block_name=ticket.block_name,
+        description=ticket.description,
+        status="PENDING",
+        created_at=datetime.utcnow().isoformat()
+    )
+    db.add(db_ticket)
+    await db.commit()
+    
+    res_loaded = await db.execute(
+        select(models.EstateMaintenanceTicket)
+        .where(models.EstateMaintenanceTicket.id == db_ticket.id)
+        .options(selectinload(models.EstateMaintenanceTicket.reporter))
+    )
+    return res_loaded.scalars().first()
+
+@app.get("/maintenance/tickets", response_model=list[schemas.MaintenanceTicketOut])
+async def list_maintenance_tickets(current_user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    user_roles = [current_user.system_role]
+    if current_user.additional_roles and isinstance(current_user.additional_roles, list):
+        user_roles.extend(current_user.additional_roles)
+        
+    if any(role in ["ADMIN", "SUPER_ADMIN", "ESTATE_MANAGER"] for role in user_roles):
+        res = await db.execute(select(models.EstateMaintenanceTicket).options(selectinload(models.EstateMaintenanceTicket.reporter)))
+    else:
+        res = await db.execute(select(models.EstateMaintenanceTicket).where(models.EstateMaintenanceTicket.reporter_id == current_user.id).options(selectinload(models.EstateMaintenanceTicket.reporter)))
+    return res.scalars().all()
+
+@app.put("/maintenance/tickets/{id}/assign", response_model=schemas.MaintenanceTicketOut)
+async def assign_maintenance_ticket(id: str, staff_name: str, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "ESTATE_MANAGER"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(models.EstateMaintenanceTicket)
+        .where(models.EstateMaintenanceTicket.id == id)
+        .options(selectinload(models.EstateMaintenanceTicket.reporter))
+    )
+    ticket = res.scalars().first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket.assigned_to_staff = staff_name
+    ticket.status = "ASSIGNED"
+    await db.commit()
+    await db.refresh(ticket)
+    return ticket
+
+@app.put("/maintenance/tickets/{id}/resolve", response_model=schemas.MaintenanceTicketOut)
+async def resolve_maintenance_ticket(id: str, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "ESTATE_MANAGER"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(models.EstateMaintenanceTicket)
+        .where(models.EstateMaintenanceTicket.id == id)
+        .options(selectinload(models.EstateMaintenanceTicket.reporter))
+    )
+    ticket = res.scalars().first()
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+    ticket.status = "RESOLVED"
+    await db.commit()
+    await db.refresh(ticket)
+    return ticket
+
+# --- CENTRAL STORE & VENDING ENDPOINTS ---
+@app.get("/store/inventory", response_model=list[schemas.CentralStoreItemOut])
+async def list_central_store(current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "PURCHASE_OFFICER"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(models.CentralStoreItem))
+    return res.scalars().all()
+
+@app.post("/store/inventory", response_model=schemas.CentralStoreItemOut)
+async def create_store_item(item: schemas.CentralStoreItemCreate, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "PURCHASE_OFFICER"])), db: AsyncSession = Depends(get_db)):
+    db_item = models.CentralStoreItem(
+        item_name=item.item_name,
+        quantity=item.quantity,
+        unit=item.unit
+    )
+    db.add(db_item)
+    await db.commit()
+    await db.refresh(db_item)
+    return db_item
+
+@app.post("/store/requisitions", response_model=schemas.StoreRequisitionOut)
+async def create_store_requisition(req: schemas.StoreRequisitionCreate, current_user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    res_it = await db.execute(select(models.CentralStoreItem).where(models.CentralStoreItem.id == req.item_id))
+    it = res_it.scalars().first()
+    if not it or it.quantity < req.quantity:
+        raise HTTPException(status_code=400, detail="Item unavailable or insufficient store stock")
+        
+    db_req = models.StoreRequisition(
+        user_id=current_user.id,
+        item_id=req.item_id,
+        quantity=req.quantity,
+        status="PENDING",
+        requested_at=datetime.utcnow().isoformat()
+    )
+    db.add(db_req)
+    await db.commit()
+    
+    res_loaded = await db.execute(
+        select(models.StoreRequisition)
+        .where(models.StoreRequisition.id == db_req.id)
+        .options(
+            selectinload(models.StoreRequisition.item),
+            selectinload(models.StoreRequisition.user)
+        )
+    )
+    return res_loaded.scalars().first()
+
+@app.get("/store/requisitions", response_model=list[schemas.StoreRequisitionOut])
+async def list_store_requisitions(current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "PURCHASE_OFFICER"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(models.StoreRequisition)
+        .options(
+            selectinload(models.StoreRequisition.user),
+            selectinload(models.StoreRequisition.item)
+        )
+    )
+    return res.scalars().all()
+
+@app.put("/store/requisitions/{id}/status", response_model=schemas.StoreRequisitionOut)
+async def update_store_requisition_status(id: str, status: str, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "PURCHASE_OFFICER"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(models.StoreRequisition)
+        .where(models.StoreRequisition.id == id)
+        .options(
+            selectinload(models.StoreRequisition.item),
+            selectinload(models.StoreRequisition.user)
+        )
+    )
+    req = res.scalars().first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Requisition not found")
+        
+    if status == "DISBURSED" and req.status == "PENDING":
+        if req.item.quantity < req.quantity:
+            raise HTTPException(status_code=400, detail="Insufficient central store stock")
+        req.item.quantity -= req.quantity
+        req.status = "DISBURSED"
+    else:
+        req.status = status
+        
+    await db.commit()
+    await db.refresh(req)
+    return req
+
+@app.get("/vending/inventory", response_model=list[schemas.VendingMachineItemOut])
+async def list_vending_inventory(db: AsyncSession = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    res = await db.execute(select(models.VendingMachineItem))
+    return res.scalars().all()
+
+@app.post("/vending/{id}/refill", response_model=schemas.VendingMachineItemOut)
+async def refill_vending_machine(id: str, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "PURCHASE_OFFICER"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(models.VendingMachineItem).where(models.VendingMachineItem.id == id))
+    item = res.scalars().first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Vending item not found")
+    item.quantity = item.max_quantity
+    await db.commit()
+    await db.refresh(item)
+    return item
+
+
+# --- ADMISSIONS ENDPOINTS ---
+@app.post("/admissions/apply", response_model=schemas.AdmissionApplicationOut)
+async def apply_for_admission(app_data: schemas.AdmissionApplicationCreate, db: AsyncSession = Depends(get_db)):
+    db_app = models.AdmissionApplication(
+        first_name=app_data.first_name,
+        last_name=app_data.last_name,
+        email=app_data.email,
+        hsc_percentage=app_data.hsc_percentage,
+        category=app_data.category.upper(),
+        status="PENDING",
+        applied_at=datetime.utcnow().isoformat()
+    )
+    db.add(db_app)
+    await db.commit()
+    await db.refresh(db_app)
+    return db_app
+
+@app.post("/admissions/register-direct")
+async def register_student_direct(
+    data: schemas.StudentDirectRegister,
+    db: AsyncSession = Depends(get_db),
+    current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "REGISTRAR", "ADMISSION_ADMIN"]))
+):
+    # Check if username already exists
+    res_exist = await db.execute(select(models.User).where(func.lower(models.User.username) == func.lower(data.username.strip())))
+    if res_exist.scalars().first():
+        raise HTTPException(status_code=400, detail="Username/Roll number already exists")
+    
+    # Get department
+    res_dept = await db.execute(select(models.Department).where(models.Department.code == data.department_code))
+    dept = res_dept.scalars().first()
+    dept_id = dept.id if dept else None
+    
+    # Create User account
+    hashed_pwd = auth.get_password_hash(data.password)
+    db_user = models.User(
+        username=data.username.strip(),
+        email=data.email.strip(),
+        hashed_password=hashed_pwd,
+        first_name=data.first_name.strip(),
+        last_name=data.last_name.strip(),
+        system_role="STUDENT",
+        department_id=dept_id
+    )
+    db.add(db_user)
+    await db.commit()
+    await db.refresh(db_user)
+    
+    # Create Student Profile
+    db_profile = models.StudentProfile(
+        user_id=db_user.id,
+        enrollment_number=db_user.username,
+        current_semester=1,
+        batch_year=2024,
+        parent_whatsapp=data.father_contact or data.mother_contact,
+        parent_email=data.email,
+        cgpa="0.0"
+    )
+    db.add(db_profile)
+    
+    # Create standard fee invoice
+    db_invoice = models.FeeInvoice(
+        student_id=db_user.id,
+        amount=45000.0,
+        description="First Semester Tuition Fees",
+        status="PENDING"
+    )
+    db.add(db_invoice)
+    
+    # Create corresponding application record
+    db_app = models.AdmissionApplication(
+        first_name=data.first_name,
+        last_name=data.last_name,
+        email=data.email,
+        hsc_percentage=90.0,
+        category=data.category,
+        status="ADMITTED",
+        applied_at=datetime.utcnow().isoformat()
+    )
+    db.add(db_app)
+    
+    await db.commit()
+    return {"message": "Student registered successfully", "username": db_user.username}
+
+@app.get("/admissions/applications", response_model=list[schemas.AdmissionApplicationOut])
+async def list_admission_applications(current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "REGISTRAR", "ADMISSION_ADMIN"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(models.AdmissionApplication)
+        .order_by(models.AdmissionApplication.hsc_percentage.desc())
+    )
+    return res.scalars().all()
+
+@app.post("/admissions/applications/{id}/admit")
+async def admit_applicant(id: str, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "REGISTRAR", "ADMISSION_ADMIN"])), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(select(models.AdmissionApplication).where(models.AdmissionApplication.id == id))
+    app_data = res.scalars().first()
+    if not app_data:
+        raise HTTPException(status_code=404, detail="Application not found")
+    if app_data.status == "ADMITTED":
+        raise HTTPException(status_code=400, detail="Applicant already admitted")
+        
+    app_data.status = "ADMITTED"
+    
+    # Generate roll number username dynamically
+    res_count = await db.execute(select(models.User).where(models.User.system_role == "STUDENT"))
+    students_count = len(res_count.scalars().all())
+    roll_num = f"mit2024cse{str(students_count + 1).zfill(3)}"
+    
+    # Get a department ID (default to CSE dept)
+    res_dept = await db.execute(select(models.Department).where(models.Department.code == "CSE"))
+    dept = res_dept.scalars().first()
+    dept_id = dept.id if dept else None
+    
+    # Create User account
+    hashed_pwd = auth.get_password_hash("password123")
+    db_user = models.User(
+        username=roll_num,
+        email=app_data.email,
+        hashed_password=hashed_pwd,
+        first_name=app_data.first_name,
+        last_name=app_data.last_name,
+        system_role="STUDENT",
+        department_id=dept_id
+    )
+    db.add(db_user)
+    await db.commit()
+    await db.refresh(db_user)
+    
+    # Create Student Profile
+    db_profile = models.StudentProfile(
+        user_id=db_user.id,
+        enrollment_number=roll_num.upper(),
+        current_semester=1,
+        batch_year=2024,
+        cgpa="0.0",
+        parent_whatsapp="+919876543210"
+    )
+    db.add(db_profile)
+    await db.commit()
+    
+    return {"status": "success", "username": roll_num, "temporary_password": "password123"}
+
+
+# --- RESEARCH MODULE ENDPOINTS ---
+@app.get("/research/projects", response_model=list[schemas.ResearchProjectOut])
+async def list_research_projects(db: AsyncSession = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    res = await db.execute(
+        select(models.ResearchProject)
+        .options(selectinload(models.ResearchProject.faculty))
+    )
+    return res.scalars().all()
+
+@app.post("/research/projects", response_model=schemas.ResearchProjectOut)
+async def create_research_project(proj: schemas.ResearchProjectCreate, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "PRINCIPAL", "HOD", "FACULTY"])), db: AsyncSession = Depends(get_db)):
+    db_proj = models.ResearchProject(
+        title=proj.title,
+        funding_agency=proj.funding_agency,
+        amount=proj.amount,
+        duration=proj.duration,
+        status="ONGOING",
+        faculty_id=current_user.id
+    )
+    db.add(db_proj)
+    await db.commit()
+    
+    res_loaded = await db.execute(
+        select(models.ResearchProject)
+        .where(models.ResearchProject.id == db_proj.id)
+        .options(selectinload(models.ResearchProject.faculty))
+    )
+    return res_loaded.scalars().first()
+
+@app.get("/research/publications", response_model=list[schemas.ResearchPublicationOut])
+async def list_research_publications(db: AsyncSession = Depends(get_db), current_user: models.User = Depends(get_current_user)):
+    res = await db.execute(select(models.ResearchPublication))
+    return res.scalars().all()
+
+@app.post("/research/publications", response_model=schemas.ResearchPublicationOut)
+async def create_research_publication(pub: schemas.ResearchPublicationCreate, current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "PRINCIPAL", "HOD", "FACULTY"])), db: AsyncSession = Depends(get_db)):
+    db_pub = models.ResearchPublication(
+        title=pub.title,
+        journal=pub.journal,
+        author_name=pub.author_name,
+        year=pub.year,
+        doi=pub.doi,
+        citation_count=0
+    )
+    db.add(db_pub)
+    await db.commit()
+    await db.refresh(db_pub)
+    return db_pub
+
+
+# --- DMS LOCKER ENDPOINTS ---
+@app.get("/dms/documents", response_model=list[schemas.DocumentLockerOut])
+async def list_dms_documents(current_user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(models.DocumentLocker)
+        .where(models.DocumentLocker.owner_id == current_user.id)
+    )
+    return res.scalars().all()
+
+@app.post("/dms/documents", response_model=schemas.DocumentLockerOut)
+async def upload_dms_document(doc: schemas.DocumentLockerCreate, current_user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    import hashlib
+    raw_str = f"{doc.doc_name}-{doc.doc_type}-{doc.file_size}-{current_user.id}"
+    crypto_sig = hashlib.sha256(raw_str.encode('utf-8')).hexdigest()
+    
+    db_doc = models.DocumentLocker(
+        owner_id=current_user.id,
+        doc_name=doc.doc_name,
+        doc_type=doc.doc_type,
+        file_size=doc.file_size,
+        uploaded_at=datetime.utcnow().isoformat() + "Z",
+        cryptographic_hash=crypto_sig
+    )
+    db.add(db_doc)
+    await db.commit()
+    await db.refresh(db_doc)
+    return db_doc
+
+@app.delete("/dms/documents/{id}")
+async def delete_dms_document(id: str, current_user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(models.DocumentLocker)
+        .where(models.DocumentLocker.id == id, models.DocumentLocker.owner_id == current_user.id)
+    )
+    doc = res.scalars().first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found or access denied")
+    await db.delete(doc)
+    await db.commit()
+    return {"status": "success"}
+
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

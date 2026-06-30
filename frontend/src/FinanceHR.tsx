@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { DollarSign, FileText, CheckCircle2 } from 'lucide-react';
 import api from './api';
+import StudentDetailModal from './StudentDetailModal';
 
 export default function FinanceHR({ setAuthToken }: { setAuthToken: (t: string | null) => void }) {
   const [user, setUser] = useState<any>(null);
@@ -13,6 +14,7 @@ export default function FinanceHR({ setAuthToken }: { setAuthToken: (t: string |
   const [activeSubTab, setActiveSubTab] = useState('SCHOLARSHIPS');
   const [selectedScheme, setSelectedScheme] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
 
   // Leave Application States
   const [showApplyLeaveModal, setShowApplyLeaveModal] = useState(false);
@@ -222,7 +224,12 @@ export default function FinanceHR({ setAuthToken }: { setAuthToken: (t: string |
                           const hasFilled = scholarships.some(sc => sc.student_id === s.id && sc.status !== 'PENDING_SCHOLARSHIP_SECTION');
                           return (
                             <tr key={s.id} className="hover:bg-slate-50/50">
-                              <td className="px-4 py-3 font-semibold text-slate-700">{s.first_name} {s.last_name}</td>
+                              <td 
+                                onClick={() => setSelectedStudentId(s.id)}
+                                className="px-4 py-3 font-semibold text-slate-700 hover:text-blue-600 hover:underline cursor-pointer"
+                              >
+                                {s.first_name} {s.last_name}
+                              </td>
                               <td className="px-4 py-3 font-mono font-semibold text-slate-500">{s.student_profile?.enrollment_number || 'N/A'}</td>
                               <td className="px-4 py-3 font-semibold text-slate-600">{s.student_profile?.cgpa || 'N/A'}</td>
                               <td className="px-4 py-3 font-bold">
@@ -376,7 +383,12 @@ export default function FinanceHR({ setAuthToken }: { setAuthToken: (t: string |
                     const totalDues = sch ? (sch.scholarship_name.includes("TFWS") ? 0 : 62500) : 125000;
                     return (
                       <tr key={s.id} className="hover:bg-slate-50/80 transition-colors">
-                        <td className="px-5 py-4 font-semibold text-slate-800">{s.first_name} {s.last_name}</td>
+                        <td 
+                          onClick={() => setSelectedStudentId(s.id)}
+                          className="px-5 py-4 font-semibold text-slate-800 hover:text-blue-600 hover:underline cursor-pointer"
+                        >
+                          {s.first_name} {s.last_name}
+                        </td>
                         <td className="px-5 py-4 font-mono font-bold text-slate-700 text-xs">{s.student_profile?.enrollment_number || 'N/A'}</td>
                         <td className="px-5 py-4">
                           <span className="inline-flex items-center px-2 py-0.5 rounded-lg text-xs font-bold bg-slate-100 text-slate-600">
@@ -489,6 +501,12 @@ export default function FinanceHR({ setAuthToken }: { setAuthToken: (t: string |
           </div>
         </div>
       )}
+      
+      <StudentDetailModal 
+        studentId={selectedStudentId} 
+        isOpen={selectedStudentId !== null} 
+        onClose={() => setSelectedStudentId(null)} 
+      />
     </div>
   );
 }

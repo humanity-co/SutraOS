@@ -3,7 +3,7 @@ import bcrypt
 import random
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from models import Base, User, Department, StudentProfile, FacultyProfile, Course, ExamRecord, ScholarshipLedger, PlacementDrive, FeeInvoice, LeaveRequest, Classroom, CourseOffering, TimetableSlot, LibraryBook, LibraryCheckout, BusRoute, TransportReservation, HostelAdmission, OffCampusPlacement, BusStop
+from models import Base, User, Department, StudentProfile, FacultyProfile, Course, ExamRecord, ScholarshipLedger, PlacementDrive, FeeInvoice, LeaveRequest, Classroom, CourseOffering, TimetableSlot, LibraryBook, LibraryCheckout, BusRoute, TransportReservation, HostelAdmission, OffCampusPlacement, BusStop, MessMenu, MessGrocery, SportsEquipment, CentralStoreItem, VendingMachineItem, ResearchProject, ResearchPublication, AdmissionApplication
 from passlib.context import CryptContext
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -335,12 +335,23 @@ async def seed_data():
         r2.stops = db_stops
         await session.commit()
 
-        # Seed Hostel Admissions
-        hostel_admissions = [
-            HostelAdmission(student_id=student_users[0].id, room_number="101-A", block_name="Aryabhata Hostel Block", parent_consent_approved=True),
-            HostelAdmission(student_id=student_users[1].id, room_number="102-B", block_name="Aryabhata Hostel Block", parent_consent_approved=False)
+        # Seed Hostel Admissions (Left blank for manual student registration)
+        # Seed Mess Menu entries for Monday to Sunday
+        days = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+        menus = [
+            MessMenu(day_of_week=d, breakfast="Poha & Tea", lunch="Roti, Paneer Masala, Rice, Dal", snacks="Samosa & Coffee", dinner="Chapati, Mix Veg, Curd, Rice")
+            for d in days
         ]
-        session.add_all(hostel_admissions)
+        session.add_all(menus)
+        
+        # Seed Mess Grocery Items
+        groceries = [
+            MessGrocery(item_name="Basmati Rice", current_stock=150.0, min_stock=30.0, unit="kg"),
+            MessGrocery(item_name="Sunflower Oil", current_stock=50.0, min_stock=15.0, unit="liter"),
+            MessGrocery(item_name="Fresh Milk", current_stock=120.0, min_stock=20.0, unit="liter"),
+            MessGrocery(item_name="Arhar Dal", current_stock=80.0, min_stock=20.0, unit="kg"),
+        ]
+        session.add_all(groceries)
 
         await session.commit()
         print("Database seeding completed successfully!")

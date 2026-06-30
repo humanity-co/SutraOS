@@ -44,8 +44,11 @@ export default function Layout({ children, setAuthToken }: LayoutProps) {
   const navItems = [
     { name: 'Workspace', path: '/', roles: ['ALL'] },
     { name: 'Directory', path: '/directory', roles: ['SUPER_ADMIN', 'INSTITUTION_ADMIN', 'PRINCIPAL', 'REGISTRAR', 'HOD', 'FACULTY'] },
+    { name: 'Admissions', path: '/admissions', roles: ['SUPER_ADMIN', 'ADMIN', 'REGISTRAR', 'ADMISSION_ADMIN'] },
     { name: 'Academics', path: '/academics', roles: ['SUPER_ADMIN', 'PRINCIPAL', 'HOD', 'FACULTY', 'STUDENT', 'EXAM_CONTROLLER'] },
     { name: 'Facilities', path: '/facilities', roles: ['ALL'] },
+    { name: 'Research', path: '/research', roles: ['ALL'] },
+    { name: 'Documents', path: '/documents', roles: ['ALL'] },
     { name: 'Finance & HR', path: '/finance-hr', roles: ['SUPER_ADMIN', 'PRINCIPAL', 'ACCOUNTS', 'FACULTY', 'STUDENT', 'HOD', 'REGISTRAR'] },
     { name: 'Placements & Campus', path: '/placements-campus', roles: ['SUPER_ADMIN', 'PRINCIPAL', 'PLACEMENT_OFFICER', 'HOD', 'STUDENT'] }
   ];

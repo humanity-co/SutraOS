@@ -1,5 +1,6 @@
 from pydantic import BaseModel, EmailStr
 from typing import Optional
+from datetime import datetime
 
 class Token(BaseModel):
     access_token: str
@@ -21,6 +22,7 @@ class UserOut(BaseModel):
     first_name: str
     last_name: str
     system_role: str
+    additional_roles: Optional[list[str]] = []
     department_id: Optional[str]
     is_active: bool
 
@@ -98,7 +100,7 @@ class FeeInvoiceOut(BaseModel):
     description: str
     status: str
     receipt_number: Optional[str]
-    paid_at: Optional[str] = None # Will format datetime to string if needed
+    paid_at: Optional[datetime] = None
     due_date: Optional[str] = None
 
     class Config:
@@ -244,6 +246,7 @@ class GatepassRequestOut(BaseModel):
     out_date: str
     in_date: str
     status: str
+    signature_verified: bool = False
     student: Optional[UserOut]
 
     class Config:
@@ -389,20 +392,60 @@ class TransportReservationOut(BaseModel):
 
 # --- HOSTEL SCHEMAS ---
 class HostelAdmissionCreate(BaseModel):
-    student_id: str
-    room_number: str
-    block_name: str
-    parent_consent_approved: Optional[bool] = True
+    course_year: Optional[str] = "VI"
+    gender: Optional[str] = "Male"
+    policy_name: Optional[str] = "MIT Aurangabad Hostel Policy"
+    plan_name: Optional[str] = "Hostel Plan 2025-2026"
+    
+    father_name: str
+    father_contact: str
+    father_address: str
+    mother_name: Optional[str] = None
+    mother_contact: Optional[str] = None
+    mother_address: Optional[str] = None
+    guardian_name: Optional[str] = None
+    guardian_contact: Optional[str] = None
+    guardian_address: Optional[str] = None
+    
+    vehicle_number: Optional[str] = None
+    license_number: Optional[str] = None
 
 class HostelAdmissionOut(BaseModel):
     id: str
     student_id: str
-    room_number: str
-    block_name: str
+    course_year: Optional[str] = None
+    gender: Optional[str] = None
+    policy_name: Optional[str] = None
+    plan_name: Optional[str] = None
+    
+    father_name: Optional[str] = None
+    father_contact: Optional[str] = None
+    father_address: Optional[str] = None
+    mother_name: Optional[str] = None
+    mother_contact: Optional[str] = None
+    mother_address: Optional[str] = None
+    guardian_name: Optional[str] = None
+    guardian_contact: Optional[str] = None
+    guardian_address: Optional[str] = None
+    
+    vehicle_number: Optional[str] = None
+    license_number: Optional[str] = None
+    
+    block_name: Optional[str] = None
+    floor_name: Optional[str] = None
+    room_number: Optional[str] = None
+    
+    status: str
     parent_consent_approved: bool
+    student: Optional[UserOut] = None
     
     class Config:
         from_attributes = True
+
+class HostelAllocationRequest(BaseModel):
+    block_name: str
+    floor_name: str
+    room_number: str
 
 
 # --- OFF CAMPUS PLACEMENT SCHEMAS ---
@@ -430,3 +473,234 @@ class OffCampusPlacementOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# --- MESS MANAGEMENT ---
+class MessMenuOut(BaseModel):
+    id: str
+    day_of_week: str
+    breakfast: str
+    lunch: str
+    snacks: str
+    dinner: str
+    class Config:
+        from_attributes = True
+
+class MessFeedbackCreate(BaseModel):
+    rating: int
+    review: Optional[str] = None
+
+class MessFeedbackOut(BaseModel):
+    id: str
+    student_id: str
+    rating: int
+    review: Optional[str]
+    created_at: str
+    student: Optional[UserOut] = None
+    class Config:
+        from_attributes = True
+
+class MessGroceryOut(BaseModel):
+    id: str
+    item_name: str
+    current_stock: float
+    min_stock: float
+    unit: str
+    class Config:
+        from_attributes = True
+
+# --- SPORTS MANAGEMENT ---
+class SportsEquipmentCreate(BaseModel):
+    name: str
+    total_qty: int
+
+class SportsEquipmentOut(BaseModel):
+    id: str
+    name: str
+    total_qty: int
+    available_qty: int
+    class Config:
+        from_attributes = True
+
+class SportsIssueRequestCreate(BaseModel):
+    equipment_id: str
+    quantity: int
+
+class SportsIssueRequestOut(BaseModel):
+    id: str
+    student_id: str
+    equipment_id: str
+    quantity: int
+    status: str
+    request_date: str
+    returned_at: Optional[str]
+    student: Optional[UserOut] = None
+    equipment: Optional[SportsEquipmentOut] = None
+    class Config:
+        from_attributes = True
+
+class SportsTournamentCreate(BaseModel):
+    team_name: str
+    sport_name: str
+    members_count: int
+
+class SportsTournamentOut(BaseModel):
+    id: str
+    team_name: str
+    sport_name: str
+    members_count: int
+    registered_by_id: str
+    registered_at: str
+    registered_by: Optional[UserOut] = None
+    class Config:
+        from_attributes = True
+
+# --- MAINTENANCE ---
+class MaintenanceTicketCreate(BaseModel):
+    category: str
+    block_name: str
+    description: str
+
+class MaintenanceTicketOut(BaseModel):
+    id: str
+    reporter_id: str
+    category: str
+    block_name: str
+    description: str
+    assigned_to_staff: Optional[str]
+    status: str
+    created_at: str
+    reporter: Optional[UserOut] = None
+    class Config:
+        from_attributes = True
+
+# --- CENTRAL STORE & VENDING ---
+class CentralStoreItemCreate(BaseModel):
+    item_name: str
+    quantity: int
+    unit: str
+
+class CentralStoreItemOut(BaseModel):
+    id: str
+    item_name: str
+    quantity: int
+    unit: str
+    class Config:
+        from_attributes = True
+
+class StoreRequisitionCreate(BaseModel):
+    item_id: str
+    quantity: int
+
+class StoreRequisitionOut(BaseModel):
+    id: str
+    user_id: str
+    item_id: str
+    quantity: int
+    status: str
+    requested_at: str
+    user: Optional[UserOut] = None
+    item: Optional[CentralStoreItemOut] = None
+    class Config:
+        from_attributes = True
+
+class VendingMachineItemOut(BaseModel):
+    id: str
+    location: str
+    item_name: str
+    quantity: int
+    max_quantity: int
+    class Config:
+        from_attributes = True
+
+
+# --- RESEARCH MODULE SCHEMAS ---
+class ResearchProjectCreate(BaseModel):
+    title: str
+    funding_agency: str
+    amount: float
+    duration: str
+
+class ResearchProjectOut(BaseModel):
+    id: str
+    title: str
+    funding_agency: str
+    amount: float
+    duration: str
+    status: str
+    faculty_id: str
+    faculty: Optional[UserOut] = None
+    class Config:
+        from_attributes = True
+
+class ResearchPublicationCreate(BaseModel):
+    title: str
+    journal: str
+    author_name: str
+    year: int
+    doi: Optional[str] = None
+
+class ResearchPublicationOut(BaseModel):
+    id: str
+    title: str
+    journal: str
+    author_name: str
+    year: int
+    doi: Optional[str] = None
+    citation_count: int
+    class Config:
+        from_attributes = True
+
+
+# --- DOCUMENT LOCKER SCHEMAS ---
+class DocumentLockerCreate(BaseModel):
+    doc_name: str
+    doc_type: str
+    file_size: str
+
+class DocumentLockerOut(BaseModel):
+    id: str
+    owner_id: str
+    doc_name: str
+    doc_type: str
+    file_size: str
+    uploaded_at: str
+    cryptographic_hash: str
+    class Config:
+        from_attributes = True
+
+
+# --- ADMISSIONS SCHEMAS ---
+class AdmissionApplicationCreate(BaseModel):
+    first_name: str
+    last_name: str
+    email: str
+    hsc_percentage: float
+    category: str
+
+class AdmissionApplicationOut(BaseModel):
+    id: str
+    first_name: str
+    last_name: str
+    email: str
+    hsc_percentage: float
+    category: str
+    status: str
+    applied_at: str
+    class Config:
+        from_attributes = True
+
+class StudentDirectRegister(BaseModel):
+    first_name: str
+    last_name: str
+    email: str
+    username: str
+    password: str
+    department_code: str
+    category: str
+    father_name: Optional[str] = None
+    father_contact: Optional[str] = None
+    father_address: Optional[str] = None
+    mother_name: Optional[str] = None
+    mother_contact: Optional[str] = None
+    mother_address: Optional[str] = None

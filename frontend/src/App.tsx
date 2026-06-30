@@ -7,7 +7,9 @@ import FinanceHR from './FinanceHR';
 import Academics from './Academics';
 import PlacementsCampus from './PlacementsCampus';
 import Facilities from './Facilities';
-
+import Research from './Research';
+import Documents from './Documents';
+import Admissions from './Admissions';
 import Layout from './Layout';
 
 function App() {
@@ -32,10 +34,19 @@ function App() {
           token ? <Layout setAuthToken={setToken}><Academics setAuthToken={setToken} /></Layout> : <Navigate to="/login" replace />
         } />
         <Route path="/facilities" element={
-          token ? <Layout setAuthToken={setToken}><Facilities setAuthToken={setToken} /></Layout> : <Navigate to="/login" replace />
+          token ? <Layout setAuthToken={setToken}><Facilities /></Layout> : <Navigate to="/login" replace />
         } />
         <Route path="/placements-campus" element={
           token ? <Layout setAuthToken={setToken}><PlacementsCampus setAuthToken={setToken} /></Layout> : <Navigate to="/login" replace />
+        } />
+        <Route path="/research" element={
+          token ? <Layout setAuthToken={setToken}><Research /></Layout> : <Navigate to="/login" replace />
+        } />
+        <Route path="/documents" element={
+          token ? <Layout setAuthToken={setToken}><Documents /></Layout> : <Navigate to="/login" replace />
+        } />
+        <Route path="/admissions" element={
+          token ? <Layout setAuthToken={setToken}><Admissions /></Layout> : <Navigate to="/login" replace />
         } />
       </Routes>
     </BrowserRouter>

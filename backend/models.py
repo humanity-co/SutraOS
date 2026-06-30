@@ -184,6 +184,7 @@ class GatepassRequest(Base):
     out_date = Column(String, nullable=False)
     in_date = Column(String, nullable=False)
     status = Column(String, default="PENDING") # PENDING, APPROVED, REJECTED
+    signature_verified = Column(Boolean, default=False)
     
     student = relationship("User")
 
@@ -345,8 +346,32 @@ class HostelAdmission(Base):
     __tablename__ = "hostel_admissions"
     id = Column(String, primary_key=True, index=True, default=generate_uuid)
     student_id = Column(String, ForeignKey("users.id"), unique=True, nullable=False)
-    room_number = Column(String, nullable=False)
-    block_name = Column(String, nullable=False)
+    course_year = Column(String, nullable=True, default="VI")
+    gender = Column(String, nullable=True, default="Male")
+    policy_name = Column(String, nullable=True, default="MIT Aurangabad Hostel Policy")
+    plan_name = Column(String, nullable=True, default="Hostel Plan 2025-2026")
+    
+    # Parent & Guardian Details
+    father_name = Column(String, nullable=True)
+    father_contact = Column(String, nullable=True)
+    father_address = Column(String, nullable=True)
+    mother_name = Column(String, nullable=True)
+    mother_contact = Column(String, nullable=True)
+    mother_address = Column(String, nullable=True)
+    guardian_name = Column(String, nullable=True)
+    guardian_contact = Column(String, nullable=True)
+    guardian_address = Column(String, nullable=True)
+    
+    # Other history
+    vehicle_number = Column(String, nullable=True)
+    license_number = Column(String, nullable=True)
+    
+    # Hostel allocation (NA during registration, allocated by warden)
+    block_name = Column(String, nullable=True, default="NA")
+    floor_name = Column(String, nullable=True, default="NA")
+    room_number = Column(String, nullable=True, default="NA")
+    
+    status = Column(String, nullable=True, default="PENDING")
     parent_consent_approved = Column(Boolean, default=True)
     
     student = relationship("User", foreign_keys=[student_id])
@@ -367,4 +392,158 @@ class OffCampusPlacement(Base):
     status = Column(String, default="PENDING") # PENDING, APPROVED, REJECTED
     
     student = relationship("User", foreign_keys=[student_id])
+
+
+# --- MESS MANAGEMENT ---
+class MessMenu(Base):
+    __tablename__ = "mess_menu"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    day_of_week = Column(String, nullable=False) # e.g. "Monday"
+    breakfast = Column(String, nullable=False)
+    lunch = Column(String, nullable=False)
+    snacks = Column(String, nullable=False)
+    dinner = Column(String, nullable=False)
+
+class MessFeedback(Base):
+    __tablename__ = "mess_feedback"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    student_id = Column(String, ForeignKey("users.id"), nullable=False)
+    rating = Column(Integer, nullable=False)
+    review = Column(String, nullable=True)
+    created_at = Column(String, nullable=False)
+    
+    student = relationship("User")
+
+class MessGrocery(Base):
+    __tablename__ = "mess_grocery"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    item_name = Column(String, nullable=False, unique=True)
+    current_stock = Column(Float, default=100.0)
+    min_stock = Column(Float, default=20.0)
+    unit = Column(String, default="kg")
+
+# --- SPORTS MANAGEMENT ---
+class SportsEquipment(Base):
+    __tablename__ = "sports_equipment"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    name = Column(String, nullable=False, unique=True)
+    total_qty = Column(Integer, default=10)
+    available_qty = Column(Integer, default=10)
+
+class SportsIssueRequest(Base):
+    __tablename__ = "sports_issue_requests"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    student_id = Column(String, ForeignKey("users.id"), nullable=False)
+    equipment_id = Column(String, ForeignKey("sports_equipment.id"), nullable=False)
+    quantity = Column(Integer, default=1)
+    status = Column(String, default="PENDING") # PENDING, APPROVED, RETURNED
+    request_date = Column(String, nullable=False)
+    returned_at = Column(String, nullable=True)
+    
+    student = relationship("User")
+    equipment = relationship("SportsEquipment")
+
+class SportsTournament(Base):
+    __tablename__ = "sports_tournaments"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    team_name = Column(String, nullable=False)
+    sport_name = Column(String, nullable=False)
+    members_count = Column(Integer, default=1)
+    registered_by_id = Column(String, ForeignKey("users.id"), nullable=False)
+    registered_at = Column(String, nullable=False)
+    
+    registered_by = relationship("User")
+
+# --- ESTATE MAINTENANCE ---
+class EstateMaintenanceTicket(Base):
+    __tablename__ = "estate_maintenance_tickets"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    reporter_id = Column(String, ForeignKey("users.id"), nullable=False)
+    category = Column(String, nullable=False) # ELECTRIC, PLUMBING, HVAC, CARPENTRY, OTHER
+    block_name = Column(String, nullable=False)
+    description = Column(String, nullable=False)
+    assigned_to_staff = Column(String, nullable=True) # e.g. "Electrician Ramesh"
+    status = Column(String, default="PENDING") # PENDING, ASSIGNED, RESOLVED
+    created_at = Column(String, nullable=False)
+    
+    reporter = relationship("User")
+
+# --- CENTRAL STORE & VENDING ---
+class CentralStoreItem(Base):
+    __tablename__ = "central_store_items"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    item_name = Column(String, nullable=False, unique=True)
+    quantity = Column(Integer, default=100)
+    unit = Column(String, default="units")
+
+class StoreRequisition(Base):
+    __tablename__ = "store_requisitions"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    item_id = Column(String, ForeignKey("central_store_items.id"), nullable=False)
+    quantity = Column(Integer, default=1)
+    status = Column(String, default="PENDING") # PENDING, APPROVED, DISBURSED
+    requested_at = Column(String, nullable=False)
+    
+    user = relationship("User")
+    item = relationship("CentralStoreItem")
+
+class VendingMachineItem(Base):
+    __tablename__ = "vending_machine_items"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    location = Column(String, nullable=False)
+    item_name = Column(String, nullable=False)
+    quantity = Column(Integer, default=10)
+    max_quantity = Column(Integer, default=15)
+
+
+# --- RESEARCH MODULE ---
+class ResearchProject(Base):
+    __tablename__ = "research_projects"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    title = Column(String, nullable=False)
+    funding_agency = Column(String, nullable=False)
+    amount = Column(Float, nullable=False)
+    duration = Column(String, nullable=False)
+    status = Column(String, default="ONGOING") # ONGOING, COMPLETED
+    faculty_id = Column(String, ForeignKey("users.id"), nullable=False)
+    
+    faculty = relationship("User")
+
+class ResearchPublication(Base):
+    __tablename__ = "research_publications"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    title = Column(String, nullable=False)
+    journal = Column(String, nullable=False)
+    author_name = Column(String, nullable=False)
+    year = Column(Integer, nullable=False)
+    doi = Column(String, nullable=True)
+    citation_count = Column(Integer, default=0)
+
+
+# --- DOCUMENT MANAGEMENT SYSTEM (DMS) ---
+class DocumentLocker(Base):
+    __tablename__ = "document_lockers"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    owner_id = Column(String, ForeignKey("users.id"), nullable=False)
+    doc_name = Column(String, nullable=False)
+    doc_type = Column(String, nullable=False)
+    file_size = Column(String, nullable=False)
+    uploaded_at = Column(String, nullable=False)
+    cryptographic_hash = Column(String, nullable=False)
+    
+    owner = relationship("User")
+
+
+# --- ADMISSIONS ---
+class AdmissionApplication(Base):
+    __tablename__ = "admission_applications"
+    id = Column(String, primary_key=True, index=True, default=generate_uuid)
+    first_name = Column(String, nullable=False)
+    last_name = Column(String, nullable=False)
+    email = Column(String, nullable=False)
+    hsc_percentage = Column(Float, nullable=False)
+    category = Column(String, nullable=False) # GENERAL, OBC, SC, ST
+    status = Column(String, default="PENDING") # PENDING, MERIT_LISTED, ADMITTED
+    applied_at = Column(String, nullable=False)
 
