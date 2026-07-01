@@ -379,7 +379,7 @@ export default function Dashboard() {
                         </div>
                         <div className="flex gap-2">
                           <a 
-                            href={post.attachment_url.startsWith('http') ? post.attachment_url : `http://localhost:8000${post.attachment_url}`}
+                            href={post.attachment_url.startsWith('http') ? post.attachment_url : `/api${post.attachment_url}`}
                             download={post.attachment_url.split('/').pop()}
                             target="_blank"
                             rel="noreferrer"
@@ -388,7 +388,7 @@ export default function Dashboard() {
                             Download
                           </a>
                           <button
-                            onClick={() => setPreviewUrl(post.attachment_url.startsWith('http') ? post.attachment_url : `http://localhost:8000${post.attachment_url}`)}
+                            onClick={() => setPreviewUrl(post.attachment_url.startsWith('http') ? post.attachment_url : `/api${post.attachment_url}`)}
                             className="text-emerald-600 hover:text-emerald-700 text-xs font-bold bg-emerald-50 hover:bg-emerald-100 px-3 py-1.5 rounded-lg border border-emerald-200 shadow-sm transition-colors flex items-center justify-center"
                           >
                             Preview

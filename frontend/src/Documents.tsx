@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { UploadCloud, FileText, ShieldCheck, Trash2, Calendar, Eye } from 'lucide-react';
+import { UploadCloud, FileText, FileImage, File, ShieldCheck, Trash2, Calendar, Eye } from 'lucide-react';
 import api from './api';
 
 interface DocumentLocker {
@@ -21,6 +21,40 @@ export default function Documents() {
 
   const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewFilename, setPreviewFilename] = useState<string>('document');
+  const [previewMimeType, setPreviewMimeType] = useState<string>('application/octet-stream');
+
+  const getMimeTypeFromFilename = (filename: string) => {
+    const ext = filename.split('.').pop()?.toLowerCase() || '';
+    if (ext === 'pdf') return 'application/pdf';
+    if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) return `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+    if (ext === 'txt') return 'text/plain';
+    if (['csv'].includes(ext)) return 'text/csv';
+    if (['xlsx', 'xls'].includes(ext)) return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    return 'application/octet-stream';
+  };
+
+  const getFileIcon = (filename: string) => {
+    const ext = filename.split('.').pop()?.toLowerCase() || '';
+    if (ext === 'pdf') return <FileText size={16} />;
+    if (['png', 'jpg', 'jpeg', 'gif', 'webp'].includes(ext)) return <FileImage size={16} />;
+    if (['txt', 'csv', 'xlsx', 'xls'].includes(ext)) return <File size={16} />;
+    return <FileText size={16} />;
+  };
+
+  const handlePreview = async (id: string, filename: string) => {
+    try {
+      const res = await api.get(`/dms/download/${id}`, { responseType: 'blob' });
+      const mimeType = getMimeTypeFromFilename(filename);
+      const blob = new Blob([res.data], { type: mimeType });
+      const url = window.URL.createObjectURL(blob);
+      setPreviewUrl(url);
+      setPreviewFilename(filename);
+      setPreviewMimeType(mimeType);
+    } catch (err) {
+      showNotification('error', 'Failed to load document preview');
+    }
+  };
 
   const showNotification = (type: 'success' | 'error', message: string) => {
     setNotification({ type, message });
@@ -40,14 +74,14 @@ export default function Documents() {
     fetchDocuments();
   }, []);
 
-  const simulateUpload = (fileName: string) => {
+  const simulateUpload = (file: File) => {
     setIsUploading(true);
     setUploadProgress(0);
     const interval = setInterval(() => {
       setUploadProgress((prev) => {
         if (prev >= 100) {
           clearInterval(interval);
-          completeUpload(fileName);
+          completeUpload(file);
           return 100;
         }
         return prev + 25;
@@ -55,14 +89,14 @@ export default function Documents() {
     }, 200);
   };
 
-  const completeUpload = async (fileName: string) => {
+  const completeUpload = async (file: File) => {
     try {
-      // Mock sizes depending on length
-      const fileSize = `${(Math.random() * 4 + 1).toFixed(1)} MB`;
-      await api.post('/dms/documents', {
-        doc_name: fileName,
-        doc_type: selectedCategory,
-        file_size: fileSize
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('doc_type', selectedCategory);
+
+      await api.post('/dms/documents', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
       });
       showNotification('success', 'Document securely cryptographically signed and stored!');
       fetchDocuments();
@@ -90,14 +124,14 @@ export default function Documents() {
     setDragOver(false);
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const file = e.dataTransfer.files[0];
-      simulateUpload(file.name);
+      simulateUpload(file);
     }
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const file = e.target.files[0];
-      simulateUpload(file.name);
+      simulateUpload(file);
     }
   };
 
@@ -222,7 +256,7 @@ export default function Documents() {
                       <td className="py-4.5 pr-4">
                         <div className="flex items-center gap-3">
                           <div className="w-9 h-9 bg-slate-150 rounded-xl flex items-center justify-center text-slate-600 border border-slate-200/50">
-                            <FileText size={16} />
+                            {getFileIcon(doc.doc_name)}
                           </div>
                           <div>
                             <span className="block font-bold text-slate-800 leading-snug">{doc.doc_name}</span>
@@ -254,7 +288,7 @@ export default function Documents() {
                           <ShieldCheck size={14} />
                         </button>
                         <button
-                          onClick={() => setPreviewUrl(`http://localhost:8000/dms/download/${doc.id}`)}
+                          onClick={() => handlePreview(doc.id, doc.doc_name)}
                           className="bg-blue-50 hover:bg-blue-100 text-blue-600 p-2 rounded-xl transition-colors inline-flex items-center justify-center border border-blue-100"
                           title="Preview Document"
                         >
@@ -285,11 +319,14 @@ export default function Documents() {
         <div className="fixed inset-0 z-[100] bg-slate-900/90 backdrop-blur-sm flex flex-col items-center justify-center p-4 sm:p-8 animate-in fade-in duration-200">
           <div className="w-full max-w-6xl h-full bg-white rounded-3xl overflow-hidden flex flex-col shadow-2xl border border-white/20">
             <div className="flex justify-between items-center p-4 border-b border-slate-100 bg-slate-50">
-              <h3 className="font-bold text-slate-800">Secure Document Preview</h3>
+              <div>
+                <h3 className="font-bold text-slate-800">Secure Document Preview</h3>
+                <p className="text-[11px] text-slate-500 mt-1">{previewFilename}</p>
+              </div>
               <div className="flex gap-2">
                 <a 
                   href={previewUrl}
-                  download
+                  download={previewFilename}
                   className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-sm font-bold shadow-sm transition-colors"
                 >
                   Download File
@@ -303,11 +340,32 @@ export default function Documents() {
               </div>
             </div>
             <div className="flex-1 w-full bg-slate-100/50 p-4">
-              <iframe 
-                src={previewUrl} 
-                className="w-full h-full rounded-2xl border border-slate-200 bg-white"
-                title="Document Preview"
-              />
+              {previewMimeType === 'application/pdf' ? (
+                <iframe
+                  src={previewUrl}
+                  className="w-full h-full rounded-2xl border border-slate-200 bg-white"
+                  title="PDF Preview"
+                />
+              ) : previewMimeType.startsWith('image/') ? (
+                <img
+                  src={previewUrl}
+                  alt={previewFilename}
+                  className="w-full h-full object-contain rounded-2xl border border-slate-200 bg-white"
+                />
+              ) : previewMimeType.startsWith('text/') ? (
+                <iframe
+                  src={previewUrl}
+                  className="w-full h-full rounded-2xl border border-slate-200 bg-white"
+                  title="Text Preview"
+                />
+              ) : (
+                <div className="w-full h-full rounded-2xl border border-slate-200 bg-white flex items-center justify-center p-8 text-center">
+                  <div>
+                    <p className="text-slate-700 font-bold">Preview not supported for this file type.</p>
+                    <p className="text-slate-500 text-sm mt-2">Use the download button to open it locally.</p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>

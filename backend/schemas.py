@@ -665,10 +665,7 @@ class ResearchPublicationOut(BaseModel):
 
 
 # --- DOCUMENT LOCKER SCHEMAS ---
-class DocumentLockerCreate(BaseModel):
-    doc_name: str
-    doc_type: str
-    file_size: str
+
 
 class DocumentLockerOut(BaseModel):
     id: str

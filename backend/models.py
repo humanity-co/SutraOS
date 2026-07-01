@@ -538,6 +538,7 @@ class DocumentLocker(Base):
     file_size = Column(String, nullable=False)
     uploaded_at = Column(String, nullable=False)
     cryptographic_hash = Column(String, nullable=False)
+    file_path = Column(String, nullable=False)
     
     owner = relationship("User")
 

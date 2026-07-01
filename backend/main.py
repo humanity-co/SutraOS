@@ -72,11 +72,19 @@ from database import engine, Base, get_db
 import models, schemas, auth
 from typing import Optional
 
+import sqlalchemy.exc
+from db_migrations import ensure_document_lockers_schema
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Setup tables
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+            await ensure_document_lockers_schema(engine)
+    except sqlalchemy.exc.IntegrityError:
+        # Expected race condition when multiple replicas start simultaneously
+        pass
     yield
     # Shutdown
     pass
@@ -2610,24 +2618,121 @@ async def list_dms_documents(current_user: models.User = Depends(get_current_use
     )
     return res.scalars().all()
 
+from fastapi import Form
 @app.post("/dms/documents", response_model=schemas.DocumentLockerOut)
-async def upload_dms_document(doc: schemas.DocumentLockerCreate, current_user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def upload_dms_document(
+    doc_type: str = Form(...),
+    file: UploadFile = File(...),
+    current_user: models.User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
     import hashlib
-    raw_str = f"{doc.doc_name}-{doc.doc_type}-{doc.file_size}-{current_user.id}"
+    import uuid
+    import base64
+    from fastapi import Form, UploadFile, File
+    from cryptography.fernet import Fernet
+    import auth
+    
+    # Generate consistent Fernet key from SECRET_KEY
+    key_material = hashlib.sha256(auth.SECRET_KEY.encode('utf-8')).digest()
+    fernet_key = base64.urlsafe_b64encode(key_material)
+    f_crypt = Fernet(fernet_key)
+    
+    content = await file.read()
+    file_size_mb = len(content) / (1024 * 1024)
+    file_size_str = f"{file_size_mb:.1f} MB"
+    
+    file_id = str(uuid.uuid4())
+    file_extension = file.filename.split('.')[-1] if '.' in file.filename else ''
+    safe_filename = f"{file_id}.{file_extension}"
+    file_path = os.path.join(UPLOAD_DIR, safe_filename)
+    
+    # Encrypt the file content before saving to disk
+    encrypted_content = f_crypt.encrypt(content)
+    
+    with open(file_path, 'wb') as out_file:
+        out_file.write(encrypted_content)
+        
+    raw_str = f"{file.filename}-{doc_type}-{file_size_str}-{current_user.id}"
     crypto_sig = hashlib.sha256(raw_str.encode('utf-8')).hexdigest()
     
     db_doc = models.DocumentLocker(
         owner_id=current_user.id,
-        doc_name=doc.doc_name,
-        doc_type=doc.doc_type,
-        file_size=doc.file_size,
+        doc_name=file.filename,
+        doc_type=doc_type,
+        file_size=file_size_str,
         uploaded_at=datetime.utcnow().isoformat() + "Z",
-        cryptographic_hash=crypto_sig
+        cryptographic_hash=crypto_sig,
+        file_path=file_path
     )
     db.add(db_doc)
-    await db.commit()
-    await db.refresh(db_doc)
-    return db_doc
+    try:
+        await db.commit()
+        await db.refresh(db_doc)
+        return db_doc
+    except sqlalchemy.exc.ProgrammingError as exc:
+        await db.rollback()
+        if "file_path" in str(exc):
+            await ensure_document_lockers_schema(engine)
+            db_doc = models.DocumentLocker(
+                owner_id=current_user.id,
+                doc_name=file.filename,
+                doc_type=doc_type,
+                file_size=file_size_str,
+                uploaded_at=datetime.utcnow().isoformat() + "Z",
+                cryptographic_hash=crypto_sig,
+                file_path=file_path
+            )
+            db.add(db_doc)
+            await db.commit()
+            await db.refresh(db_doc)
+            return db_doc
+        raise
+
+from fastapi.responses import FileResponse
+@app.get("/dms/download/{id}")
+async def download_dms_document(id: str, current_user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    res = await db.execute(
+        select(models.DocumentLocker)
+        .where(models.DocumentLocker.id == id, models.DocumentLocker.owner_id == current_user.id)
+    )
+    doc = res.scalars().first()
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found or access denied")
+    
+    if not doc.file_path or not isinstance(doc.file_path, str):
+        raise HTTPException(status_code=404, detail="File not found or file metadata is missing")
+
+    if not os.path.exists(doc.file_path):
+        raise HTTPException(status_code=404, detail="File missing on server")
+        
+    import hashlib
+    import base64
+    from cryptography.fernet import Fernet
+    import auth
+    from fastapi import Response
+    import mimetypes
+    
+    key_material = hashlib.sha256(auth.SECRET_KEY.encode('utf-8')).digest()
+    fernet_key = base64.urlsafe_b64encode(key_material)
+    f_crypt = Fernet(fernet_key)
+    
+    with open(doc.file_path, 'rb') as in_file:
+        encrypted_content = in_file.read()
+        
+    try:
+        decrypted_content = f_crypt.decrypt(encrypted_content)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to decrypt file. File may be corrupted or from before encryption was enabled.")
+        
+    mimetype, _ = mimetypes.guess_type(doc.doc_name)
+    content_type = mimetype or "application/octet-stream"
+    
+    return Response(
+        content=decrypted_content,
+        media_type=content_type,
+        headers={"Content-Disposition": f'inline; filename="{doc.doc_name}"'}
+    )
 
 @app.delete("/dms/documents/{id}")
 async def delete_dms_document(id: str, current_user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
@@ -2638,6 +2743,10 @@ async def delete_dms_document(id: str, current_user: models.User = Depends(get_c
     doc = res.scalars().first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found or access denied")
+    
+    if doc.file_path and isinstance(doc.file_path, str) and os.path.exists(doc.file_path):
+        os.remove(doc.file_path)
+        
     await db.delete(doc)
     await db.commit()
     return {"status": "success"}
