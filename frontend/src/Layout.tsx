@@ -35,7 +35,7 @@ export default function Layout({ children }: LayoutProps) {
     { name: 'Facilities', path: '/facilities', roles: ['ALL'] },
     { name: 'Research', path: '/research', roles: ['ALL'] },
     { name: 'Documents', path: '/documents', roles: ['ALL'] },
-    { name: 'Finance (CA Ledger)', path: '/finance', roles: ['SUPER_ADMIN', 'PRINCIPAL', 'ACCOUNTS', 'REGISTRAR'] },
+    { name: 'Finance', path: '/finance', roles: ['SUPER_ADMIN', 'PRINCIPAL', 'ACCOUNTS', 'REGISTRAR'] },
     { name: 'My HR', path: '/myhr', roles: ['SUPER_ADMIN', 'PRINCIPAL', 'HOD', 'FACULTY', 'REGISTRAR', 'HR'] },
     { name: 'Placements & Campus', path: '/placements-campus', roles: ['SUPER_ADMIN', 'PRINCIPAL', 'PLACEMENT_OFFICER', 'HOD', 'STUDENT'] }
   ];

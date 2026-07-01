@@ -906,10 +906,20 @@ async def apply_leave(leave: schemas.LeaveRequestCreate, current_user: models.Us
 
 @app.get("/hr/leaves", response_model=list[schemas.LeaveRequestOut])
 async def read_leaves(current_user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    stmt = select(models.LeaveRequest).options(selectinload(models.LeaveRequest.faculty), selectinload(models.LeaveRequest.approved_by))
-    if current_user.system_role == "HOD":
-        stmt = stmt.join(models.User, models.LeaveRequest.faculty_id == models.User.id).where(models.User.department_id == current_user.department_id)
-    result = await db.execute(stmt.order_by(models.LeaveRequest.id.desc()))
+    if current_user.system_role == "STUDENT":
+        # Students shouldn't see leave requests (that's for faculty)
+        raise HTTPException(status_code=403, detail="Students cannot view leave requests")
+    elif current_user.system_role == "FACULTY":
+        # Faculty see only their own leaves
+        stmt = select(models.LeaveRequest).where(models.LeaveRequest.faculty_id == current_user.id)
+    elif current_user.system_role == "HOD":
+        # HODs see leaves from their department
+        stmt = select(models.LeaveRequest).join(models.User, models.LeaveRequest.faculty_id == models.User.id).where(models.User.department_id == current_user.department_id)
+    else:
+        # Admin see all
+        stmt = select(models.LeaveRequest)
+    
+    result = await db.execute(stmt.options(selectinload(models.LeaveRequest.faculty), selectinload(models.LeaveRequest.approved_by)).order_by(models.LeaveRequest.id.desc()))
     return result.scalars().all()
 
 @app.put("/hr/leaves/{id}/approve", response_model=schemas.LeaveRequestOut)
@@ -1165,8 +1175,20 @@ async def request_gatepass(gp: schemas.GatepassRequestCreate, current_user: mode
     return db_gp
 
 @app.get("/campus/gatepass", response_model=list[schemas.GatepassRequestOut])
-async def list_gatepasses(current_user: models.User = Depends(require_role(["ADMIN", "SUPER_ADMIN", "SECURITY_OFFICER"])), db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(models.GatepassRequest).options(selectinload(models.GatepassRequest.student)))
+async def list_gatepasses(current_user: models.User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+    if current_user.system_role == "STUDENT":
+        # Students only see their own gatepass requests
+        result = await db.execute(
+            select(models.GatepassRequest)
+            .where(models.GatepassRequest.student_id == current_user.id)
+            .options(selectinload(models.GatepassRequest.student))
+        )
+    elif current_user.system_role in ["HOSTEL_WARDEN", "SECURITY_OFFICER", "ADMIN", "SUPER_ADMIN"]:
+        # Staff/Wardens see all requests for processing
+        result = await db.execute(select(models.GatepassRequest).options(selectinload(models.GatepassRequest.student)))
+    else:
+        raise HTTPException(status_code=403, detail="Not authorized to view gatepass requests")
+    
     return result.scalars().all()
 
 @app.put("/campus/gatepass/{id}/approve")
@@ -1870,19 +1892,18 @@ async def create_hostel_admission(adm: schemas.HostelAdmissionCreate, current_us
     if res_exist.scalars().first():
         raise HTTPException(status_code=400, detail="Student is already admitted or registered to the hostel")
         
-    profile = current_user.student_profile
     db_adm = models.HostelAdmission(
         student_id=current_user.id,
         course_year=adm.course_year,
         gender=adm.gender,
         policy_name=adm.policy_name,
         plan_name=adm.plan_name,
-        father_name=profile.father_name if profile else None,
-        father_contact=profile.father_contact if profile else None,
-        father_address=profile.father_address if profile else None,
-        mother_name=profile.mother_name if profile else None,
-        mother_contact=profile.mother_contact if profile else None,
-        mother_address=profile.mother_address if profile else None,
+        father_name=adm.father_name,
+        father_contact=adm.father_contact,
+        father_address=adm.father_address,
+        mother_name=adm.mother_name,
+        mother_contact=adm.mother_contact,
+        mother_address=adm.mother_address,
         guardian_name=adm.guardian_name,
         guardian_contact=adm.guardian_contact,
         guardian_address=adm.guardian_address,

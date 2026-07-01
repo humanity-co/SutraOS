@@ -11,22 +11,19 @@ services:
       - api
       - frontend
 
-  # Scalable Backend API cluster
+  # Backend API service with hot reload for development
   api:
     build: 
       context: ./backend
-      dockerfile: Dockerfile
-    deploy:
-      replicas: 4 # Scales to 4 instances for Result Day traffic
-      resources:
-        limits:
-          cpus: '2.0'
-          memory: 4G
+      dockerfile: Dockerfile.dev
     environment:
       - DATABASE_URL=postgresql+asyncpg://sutra:secret@db/sutraos
       - WORKERS_PER_CORE=2
     volumes:
+      - ./backend:/app
       - ./backend/uploads:/app/uploads
+    ports:
+      - "8000:8000"
     depends_on:
       - db
       - redis
@@ -47,13 +44,19 @@ services:
     ports:
       - "6379:6379"
 
-  # Scalable Frontend Nginx Servers
+  # Frontend service with Vite dev server for development
   frontend:
     build:
       context: ./frontend
-      dockerfile: Dockerfile
-    deploy:
-      replicas: 2
+      dockerfile: Dockerfile.dev
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    command: npm run dev -- --host 0.0.0.0 --cors
+    depends_on:
+      - api
 
 volumes:
   sutraos_pgdata:
