@@ -10,6 +10,17 @@ services:
     depends_on:
       - api
       - frontend
+      - gateway
+
+  # Rust API Gateway
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile.dev
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./gateway:/usr/src/app
 
   # Backend API service with hot reload for development
   api:
